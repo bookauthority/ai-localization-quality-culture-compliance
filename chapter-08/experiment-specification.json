@@ -1,0 +1,720 @@
+{
+  "experiment_id": "exp-ch08-cultural-adaptation-workflow-v1",
+  "hypothesis": "For culturally exposed content in regulated, multicultural markets, an AI localization pipeline that incorporates explicit cultural-risk modeling, automated cultural red-flag detection, culturally nuanced prompting, and routing to specialized cultural reviewers will (a) reduce culturally problematic outputs and (b) improve user trust and task success, relative to a quality- and compliance-aware baseline pipeline that lacks explicit cultural-adaptation steps.",
+  "baseline": {
+    "description": "Baseline AI localization pipeline with general quality and compliance controls but no explicit cultural-adaptation workflow stages.",
+    "key_characteristics": [
+      "Source text is ingested from a CMS/TMS-like JSON or CSV export with metadata (language, market, channel, topic, risk level).",
+      "Language detection and risk classification are performed only at a coarse level (e.g., high/medium/low based on content type and regulatory flags), not including explicit cultural-risk dimensions.",
+      "Translation is performed using a standard MT or LLM-based translation engine with glossary/terminology support but no market-specific cultural instructions.",
+      "Generic quality checks are applied: length parity, placeholder/tag preservation, basic profanity/toxicity filter, and general MT quality estimation if available.",
+      "No explicit cultural red-flag detection for sensitive topics (e.g., religion, politics, ethnicity, race, gender identity, local taboos, historical events, national symbols).",
+      "No routing to specialized cultural reviewers; if human review occurs, it is general linguist review only and not selectively triggered by cultural-risk signals.",
+      "Imagery, examples, and metaphors embedded in the content are not localized beyond literal translation of surrounding text."
+    ],
+    "pseudo_pipeline_steps": [
+      "Ingestion -> Language Detection -> Risk Classification (non-cultural) -> MT/LLM Translation -> Generic QA Checks -> Optional General Linguist Review -> Export/Publish"
+    ]
+  },
+  "treatment": {
+    "description": "Cultural-adaptation-aware pipeline that adds cultural-risk modeling, automated cultural red-flag detection, culturally nuanced prompt templates, and routing to specialist cultural reviewers and assets.",
+    "key_characteristics": [
+      "Extends baseline ingestion with explicit cultural risk modeling by market, channel, and topic using a cultural-risk classifier (rule-based + ML/LLM-assisted).",
+      "Adds an automated cultural red-flag detector over both source and localized outputs to identify sensitive topics, potentially offensive content, non-resonant metaphors, and imagery risks.",
+      "Uses market- and channel-specific LLM prompt templates that instruct the model to adapt tone, examples, and metaphors for the target culture while respecting compliance constraints (e.g., no off-label claims in pharma).",
+      "Introduces routing rules so that content with high cultural-risk scores is automatically queued for specialized cultural reviewers (in-country cultural SMEs), while low-risk content may bypass or receive sample-based review.",
+      "Enables variant generation for certain assets (e.g., marketing copy): a literal-but-culturally-clean version and a more fully transcreated version, for downstream A/B testing on user outcomes.",
+      "Adds an imagery and metaphor localization step, which flags culture-specific references (e.g., sports, holidays, idioms, gesture descriptions) and suggests or applies culturally appropriate alternatives.",
+      "Logs structured cultural annotations (risk category, detected sensitive topics, adaptation decisions) as first-class metadata for later analytics and governance."
+    ],
+    "pseudo_pipeline_steps": [
+      "Ingestion -> Language & Market Detection -> Cultural-Risk Modeling (market x channel x topic) -> Cultural Red-Flag Detection (source) -> Culturally Nuanced MT/LLM Translation & Adaptation -> Cultural Red-Flag Detection (target) -> Routing to Cultural Reviewers (based on risk score) -> Imagery/Metaphor Localization -> Export with Cultural Annotations"
+    ]
+  },
+  "workloads": [
+    {
+      "name": "WL1_marketing_landing_pages",
+      "description": "Short- to medium-form marketing landing pages and ads for a B2B SaaS product localized from US English into high-variance markets (e.g., Japan, Germany, Brazil).",
+      "content_characteristics": {
+        "approx_items": 150,
+        "avg_source_length_tokens": 120,
+        "channels": [
+          "web_marketing",
+          "digital_ads"
+        ],
+        "topics": [
+          "product_value_props",
+          "campaign_slogans",
+          "feature_descriptions"
+        ],
+        "regions": [
+          "ja-JP",
+          "de-DE",
+          "pt-BR"
+        ],
+        "risk_profile": "Medium cultural risk (brand tone, idioms, imagery), low-to-medium regulatory risk."
+      },
+      "pairing_strategy": "Each source asset is duplicated into two independent localization runs: baseline and treatment. Assets are then randomized and assigned to evaluators/users to avoid ordering or label bias.",
+      "user_outcome_task": "Task-based user study where in-market participants are asked to (a) interpret the main value proposition and (b) indicate trust and willingness to engage (e.g., sign up, request demo)."
+    },
+    {
+      "name": "WL2_support_and_help_center_articles",
+      "description": "Help-center FAQs and troubleshooting articles localized from US English for consumer tech users in culturally diverse markets.",
+      "content_characteristics": {
+        "approx_items": 100,
+        "avg_source_length_tokens": 250,
+        "channels": [
+          "help_center",
+          "in-app_support"
+        ],
+        "topics": [
+          "account_management",
+          "payment_issues",
+          "feature_usage"
+        ],
+        "regions": [
+          "es-MX",
+          "ar-SA",
+          "hi-IN"
+        ],
+        "risk_profile": "Low-to-medium cultural risk with a focus on politeness norms, address forms, and examples relevant to local life contexts."
+      },
+      "pairing_strategy": "Each article is localized via baseline and treatment; in-market evaluators see one version only (between-subject), randomly assigned, to prevent direct side-by-side bias.",
+      "user_outcome_task": "Time-to-comprehension and perceived respectfulness/politeness measured via task completion and short post-task survey."
+    },
+    {
+      "name": "WL3_high_sensitivity_pharma_patient_leaflets",
+      "description": "Patient-facing informational content for a pharmaceutical product (e.g., side-effect explanations, adherence guidance) localized into multiple markets.",
+      "content_characteristics": {
+        "approx_items": 60,
+        "avg_source_length_tokens": 300,
+        "channels": [
+          "patient_leaflet_pdf",
+          "patient_education_web"
+        ],
+        "topics": [
+          "disease_education",
+          "medication_guide",
+          "side_effects_and_warnings"
+        ],
+        "regions": [
+          "fr-FR",
+          "es-ES",
+          "zh-CN"
+        ],
+        "risk_profile": "High cultural risk (stigma around disease, mental health, reproductive health) and high regulatory risk; cultural missteps may lead to mistrust or non-adherence."
+      },
+      "pairing_strategy": "Within-subject expert evaluation: in-country medical-cultural specialists rate both baseline and treatment versions of each item in randomized order (identity masked) for cultural appropriateness and patient trust impact.",
+      "user_outcome_task": "Expert judgment on likely patient trust and adherence impact (proxy for real-world outcomes) plus qualitative annotations of cultural issues."
+    }
+  ],
+  "controls": {
+    "data_controls": [
+      "Use the same source content set for both baseline and treatment runs, with deterministic content IDs to allow exact pairing.",
+      "Ensure identical language, market, channel, and topic metadata are provided to both pipelines, except for treatment-specific cultural-risk features where needed.",
+      "No overlapping items between training/fine-tuning data (if used) and evaluation sets; document any pretraining or fine-tuning corpora that could contain near-duplicates."
+    ],
+    "model_controls": [
+      "Use the same underlying MT/LLM engine(s) and versions for baseline and treatment; only prompt templates, routing logic, and added detection modules differ.",
+      "Fix model temperature and decoding parameters across conditions (e.g., temperature=0.2, top_p=0.9, max_tokens tuned per channel).",
+      "Pin any external classification/embedding models to specific versions with checksums or container images."
+    ],
+    "evaluation_controls": [
+      "Blind evaluators (linguists, cultural SMEs, end users) to condition labels; refer to variants only as A/B.",
+      "Randomize presentation order of variants (A vs B) for within-subject designs to avoid order effects.",
+      "Ensure inter-rater reliability by assigning at least 3 independent raters per item for expert cultural evaluations and using clear rubrics.",
+      "Standardize evaluation instructions and examples across markets; localize rubrics carefully without changing their intent."
+    ],
+    "environmental_controls": [
+      "Run all automated pipeline steps for baseline and treatment in the same containerized environment (same OS image, dependency versions, and hardware type).",
+      "Execute both conditions within a narrow time window to minimize drift from external APIs or model updates; if unavoidable, log provider model version metadata.",
+      "Use fixed random seeds for any randomized operations (e.g., sampling variants, shuffling order) to ensure reproducibility."
+    ]
+  },
+  "metrics": [
+    {
+      "name": "cultural_inappropriateness_rate",
+      "unit": "percentage_of_items_with_at_least_one_cultural_issue_flagged_by_experts",
+      "description": "Share of localized items rated by in-market cultural experts as containing at least one culturally inappropriate, offensive, or strongly non-resonant element (scale: any issue vs none)."
+    },
+    {
+      "name": "cultural_severity_score",
+      "unit": "mean_expert_rated_severity_on_0_4_scale",
+      "description": "Average severity of cultural issues per item on a rubric (0=no issue, 1=minor, 2=moderate, 3=major, 4=critical), aggregated across expert raters."
+    },
+    {
+      "name": "user_trust_score",
+      "unit": "mean_likert_rating_1_7",
+      "description": "Average in-market end-user rating of how much they trust the content/brand after reading the localized asset, measured with a 1\u20137 Likert scale."
+    },
+    {
+      "name": "task_success_rate",
+      "unit": "percentage_of_users_successfully_completing_task",
+      "description": "Share of users completing the assigned task correctly (e.g., identifying correct action, understanding value prop, or correctly following an instruction) without external help."
+    },
+    {
+      "name": "time_to_comprehension",
+      "unit": "seconds",
+      "description": "Median time from content exposure to correct answer on a comprehension question, used especially for support/help workloads."
+    },
+    {
+      "name": "cultural_redflag_precision",
+      "unit": "ratio_true_positives_to_all_system_flags",
+      "description": "Precision of the automated cultural red-flag detector compared to expert-labeled issues (true positive flags / all system flags)."
+    },
+    {
+      "name": "cultural_redflag_recall",
+      "unit": "ratio_true_positives_to_all_expert_issues",
+      "description": "Recall of the automated cultural red-flag detector (true positive flags / all expert-identified issues)."
+    },
+    {
+      "name": "reviewer_overhead_per_item",
+      "unit": "minutes_per_item",
+      "description": "Average time specialized cultural reviewers spend per item (including reading, annotating, and approving) for high-risk items."
+    },
+    {
+      "name": "cultural_issue_escape_rate",
+      "unit": "percentage_of_items_with_expert_flagged_issues_that_were_not_caught_in_pipeline",
+      "description": "Proportion of items with any expert-identified cultural problem that were not flagged by either automated detectors or human cultural reviewers before evaluation."
+    },
+    {
+      "name": "subjective_cultural_fit_score",
+      "unit": "mean_likert_rating_1_7",
+      "description": "In-market linguistic/cultural experts\u2019 subjective rating of how natural and locally resonant the content feels for the target audience (1=very poor fit, 7=excellent fit)."
+    }
+  ],
+  "success_criteria": {
+    "primary": [
+      "At least a 30% relative reduction in cultural_inappropriateness_rate in the treatment pipeline vs the baseline across all workloads combined, with p < 0.05.",
+      "At least a 0.5-point absolute improvement in subjective_cultural_fit_score (1\u20137 scale) in the treatment vs baseline, averaged across markets and workloads, with p < 0.05."
+    ],
+    "secondary": [
+      "For WL1_marketing_landing_pages, at least a 10% relative increase in user_trust_score and a 5 percentage point absolute increase in task_success_rate for treatment vs baseline.",
+      "For WL2_support_and_help_center_articles, a statistically significant reduction in median time_to_comprehension for treatment vs baseline, without increasing cultural_inappropriateness_rate.",
+      "For WL3_high_sensitivity_pharma_patient_leaflets, a statistically significant reduction in cultural_severity_score and cultural_issue_escape_rate in the treatment condition.",
+      "Automated cultural red-flag detector achieves at least 0.7 cultural_redflag_precision and 0.6 cultural_redflag_recall against expert labels on the combined evaluation set."
+    ],
+    "tradeoff_constraints": [
+      "Any increase in reviewer_overhead_per_item for treatment should not exceed 50% over baseline for medium-risk workloads (WL1, WL2); for high-risk workload (WL3), higher overhead is acceptable but must be quantified.",
+      "Treatment must not increase cultural_inappropriateness_rate in any single market by more than 5 percentage points relative to baseline; if this occurs, the experiment is considered inconclusive for that market and requires further investigation."
+    ]
+  },
+  "failure_modes": [
+    "Automated cultural red-flag detector produces many false positives, overwhelming reviewers and increasing reviewer_overhead_per_item without materially improving cultural_inappropriateness_rate.",
+    "Culturally nuanced prompts induce unintended changes in meaning (e.g., softening regulatory warnings, adding unapproved claims), causing conflicts with compliance or quality metrics outside the scope of this experiment.",
+    "Inconsistent behavior across markets where treatment improves cultural fit in some regions but degrades it in others, making global rollout strategies unclear.",
+    "Evaluator instructions or rubrics are misinterpreted across cultures, leading to noisy or non-comparable cultural_severity_score and subjective_cultural_fit_score.",
+    "End-user studies are underpowered (too few participants), resulting in inconclusive changes in user_trust_score or task_success_rate.",
+    "Technical integration issues cause baseline and treatment to use slightly different model versions or parameter settings, confounding results.",
+    "Cultural reviewers adopt different internal standards across conditions once unblinded post-hoc, biasing qualitative feedback and complicating interpretation.",
+    "Localized imagery/metaphor adaptations accidentally introduce new cultural risks that the text-based detectors do not catch (e.g., visual symbols with unintended meanings)."
+  ],
+  "required_environment": {
+    "infrastructure": {
+      "compute": "Container-capable environment (e.g., Docker + Kubernetes or local Docker with sufficient CPU/GPU for LLM inference and evaluation workloads).",
+      "storage": "Secure storage for source/target texts, annotations, logs, and user-study data (structured as JSON/Parquet/CSV).",
+      "network": "Outbound HTTPS access to MT/LLM APIs and optionally to third-party classification services, unless fully on-prem models are used."
+    },
+    "software_stack": {
+      "language": "Python 3.10+",
+      "core_libraries": [
+        "pydantic or dataclasses for schema validation",
+        "pandas for data handling",
+        "numpy and scipy for statistics",
+        "scikit-learn for basic classification metrics (precision/recall, significance tests)",
+        "requests or httpx for API calls",
+        "PyYAML and/or json for configuration and data IO",
+        "jinja2 for parameterized prompt templates",
+        "matplotlib or seaborn for optional plots of metric distributions"
+      ],
+      "ml_nlp_components": [
+        "Access to at least one MT/LLM provider (e.g., OpenAI, Anthropic, Azure OpenAI, or an on-prem LLM) capable of multi-language translation and text classification.",
+        "Optional: Hugging Face transformers-based multilingual classification model for cultural-risk topic detection and toxicity analysis.",
+        "Language detection library (e.g., fasttext, langdetect, or lingua-py)."
+      ],
+      "experiment_management": [
+        "Configuration files in YAML/JSON to define pipelines, markets, workloads, and parameters.",
+        "Optional: MLflow or equivalent to log runs, params, and metrics; if not used, store structured logs as JSON lines."
+      ]
+    },
+    "data_requirements": {
+      "source_content": "Representative, de-identified real or realistically simulated content for the three workloads, labeled with language, market, channel, and topic.",
+      "annotation_schemas": "JSON/YAML schemas for expert cultural annotations, red-flag labels, severity scores, and user-study responses.",
+      "participant_pools": {
+        "experts": "In-market linguists and cultural SMEs for each target region.",
+        "end_users": "Target users recruited per region for WL1 and WL2, sufficient to achieve statistical power (e.g., >= 50 participants per condition per market where feasible)."
+      }
+    },
+    "repository_structure": {
+      "root_repo": "https://github.com/bookauthority/ai-localization-quality-culture-compliance",
+      "proposed_subdirs": [
+        "ch08_cultural_adaptation/01_prepare_datasets.py",
+        "ch08_cultural_adaptation/02_run_baseline_pipeline.py",
+        "ch08_cultural_adaptation/03_run_treatment_pipeline.py",
+        "ch08_cultural_adaptation/04_collect_expert_annotations.ipynb",
+        "ch08_cultural_adaptation/05_analyze_results.ipynb",
+        "ch08_cultural_adaptation/config/workloads.yaml",
+        "ch08_cultural_adaptation/config/prompts/",
+        "ch08_cultural_adaptation/data/raw/",
+        "ch08_cultural_adaptation/data/processed/",
+        "ch08_cultural_adaptation/results/"
+      ]
+    }
+  },
+  "run_instructions": [
+    "1. Environment setup",
+    "   1.1. Clone the repository: `git clone https://github.com/bookauthority/ai-localization-quality-culture-compliance`.",
+    "   1.2. Navigate to chapter directory: `cd ai-localization-quality-culture-compliance/ch08_cultural_adaptation`.",
+    "   1.3. Build or pull the provided Docker image (if available) or create a Python virtual environment.",
+    "   1.4. Install dependencies: `pip install -r requirements.txt` (requirements file should pin versions for reproducibility).",
+    "   1.5. Configure API keys or local model endpoints in a secure `.env` file or environment variables (documented in `README.md`).",
+    "",
+    "2. Data preparation",
+    "   2.1. Place or generate source datasets for WL1, WL2, and WL3 under `data/raw/`, following the documented schema (e.g., `source_id`, `source_text`, `source_language`, `target_language`, `market`, `channel`, `topic`, `risk_level`).",
+    "   2.2. Run the dataset preparation script to validate and split data: `python 01_prepare_datasets.py --config config/workloads.yaml`.",
+    "   2.3. This script should output standardized datasets to `data/processed/`, including paired IDs and splits for baseline and treatment, and a manifest of items for annotation.",
+    "",
+    "3. Run baseline pipeline",
+    "   3.1. Ensure `config/baseline_pipeline.yaml` is configured to use generic prompts and no cultural-specific modules.",
+    "   3.2. Execute: `python 02_run_baseline_pipeline.py --config config/baseline_pipeline.yaml`.",
+    "   3.3. The script should produce localized outputs per workload under `results/baseline/{WL}/translations.jsonl`, along with logs of generic QA checks.",
+    "",
+    "4. Run treatment pipeline",
+    "   4.1. Configure `config/treatment_pipeline.yaml` to enable cultural-risk modeling, automated red-flag detection, culturally nuanced prompts, routing logic, and imagery/metaphor localization steps.",
+    "   4.2. Ensure culturally nuanced prompt templates for each market and channel are present under `config/prompts/` (e.g., `marketing_ja-JP_cultural_prompt.jinja2`).",
+    "   4.3. Execute: `python 03_run_treatment_pipeline.py --config config/treatment_pipeline.yaml`.",
+    "   4.4. The script should output localized content under `results/treatment/{WL}/translations.jsonl` and detailed cultural-risk logs and red-flag metadata under `results/treatment/{WL}/cultural_metadata.jsonl`.",
+    "",
+    "5. Collect expert cultural annotations",
+    "   5.1. Export paired baseline and treatment items for expert evaluation using helper utilities (e.g., `python utils/export_for_experts.py`).",
+    "   5.2. Load `04_collect_expert_annotations.ipynb` and follow instructions to import expert-labeled CSV/JSON files once evaluations are completed.",
+    "   5.3. The notebook should merge expert annotations (cultural issues, severity, subjective fit scores) back into the main results tables by `source_id` and condition.",
+    "",
+    "6. Run end-user studies (if applicable in your environment)",
+    "   6.1. For WL1 and WL2, integrate exported localized variants into a survey or UX testing tool of your choice.",
+    "   6.2. Ensure participants are randomly assigned to baseline or treatment variants and that response data (trust scores, task success, completion times) are captured with condition labels but without revealing condition to participants.",
+    "   6.3. Export user-study results as CSV/JSON and place them under `results/user_studies/{WL}/`.",
+    "",
+    "7. Analyze results",
+    "   7.1. Open `05_analyze_results.ipynb` and configure paths to baseline, treatment, expert annotation, and user-study files.",
+    "   7.2. Run the notebook to compute all defined metrics (cultural_inappropriateness_rate, cultural_severity_score, user_trust_score, task_success_rate, time_to_comprehension, cultural_redflag_precision, cultural_redflag_recall, reviewer_overhead_per_item, cultural_issue_escape_rate, subjective_cultural_fit_score).",
+    "   7.3. The notebook should implement appropriate statistical tests (e.g., t-tests or non-parametric equivalents, chi-squared tests for proportions) and output a summary report under `results/summary/summary_report.json` and optional visualizations under `results/summary/plots/`.",
+    "",
+    "8. Document and interpret findings",
+    "   8.1. Review the summary report against the predefined success_criteria.",
+    "   8.2. Document any deviations from the planned environment, workloads, or procedures in a separate `results/summary/experiment_log.md` file to maintain auditability.",
+    "   8.3. Capture key learnings about which markets, channels, and topics benefited most or least from the cultural-adaptation workflow, and identify potential refinements for future iterations."
+  ],
+  "evidence_schema": {
+    "baseline_output_record": {
+      "type": "object",
+      "required": [
+        "source_id",
+        "condition",
+        "workload",
+        "source_text",
+        "target_text",
+        "source_language",
+        "target_language",
+        "market",
+        "channel",
+        "topic",
+        "risk_level",
+        "timestamp"
+      ],
+      "properties": {
+        "source_id": {
+          "type": "string",
+          "description": "Stable identifier linking all variants and annotations for a given source item."
+        },
+        "condition": {
+          "type": "string",
+          "enum": [
+            "baseline"
+          ]
+        },
+        "workload": {
+          "type": "string",
+          "enum": [
+            "WL1_marketing_landing_pages",
+            "WL2_support_and_help_center_articles",
+            "WL3_high_sensitivity_pharma_patient_leaflets"
+          ]
+        },
+        "source_text": {
+          "type": "string"
+        },
+        "target_text": {
+          "type": "string"
+        },
+        "source_language": {
+          "type": "string"
+        },
+        "target_language": {
+          "type": "string"
+        },
+        "market": {
+          "type": "string"
+        },
+        "channel": {
+          "type": "string"
+        },
+        "topic": {
+          "type": "string"
+        },
+        "risk_level": {
+          "type": "string"
+        },
+        "generic_qa_flags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "List of generic QA flags (e.g., length_mismatch, placeholder_issue)."
+        },
+        "metadata": {
+          "type": "object",
+          "description": "Any additional metadata logged by the baseline pipeline."
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "treatment_output_record": {
+      "type": "object",
+      "required": [
+        "source_id",
+        "condition",
+        "workload",
+        "source_text",
+        "target_text",
+        "source_language",
+        "target_language",
+        "market",
+        "channel",
+        "topic",
+        "risk_level",
+        "cultural_risk_score",
+        "timestamp"
+      ],
+      "properties": {
+        "source_id": {
+          "type": "string"
+        },
+        "condition": {
+          "type": "string",
+          "enum": [
+            "treatment"
+          ]
+        },
+        "workload": {
+          "type": "string"
+        },
+        "source_text": {
+          "type": "string"
+        },
+        "target_text": {
+          "type": "string"
+        },
+        "source_language": {
+          "type": "string"
+        },
+        "target_language": {
+          "type": "string"
+        },
+        "market": {
+          "type": "string"
+        },
+        "channel": {
+          "type": "string"
+        },
+        "topic": {
+          "type": "string"
+        },
+        "risk_level": {
+          "type": "string"
+        },
+        "cultural_risk_score": {
+          "type": "number",
+          "description": "Numeric score (e.g., 0\u20131 or 0\u2013100) indicating estimated cultural risk based on market, channel, and topic."
+        },
+        "source_cultural_red_flags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Automated detector flags on the source text (e.g., 'religious_reference', 'political_content')."
+        },
+        "target_cultural_red_flags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Automated detector flags on the localized text."
+        },
+        "imagery_metaphor_actions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "description": "Type of adaptation, e.g., 'metaphor_replaced', 'imagery_flagged', 'sports_reference_localized'."
+              },
+              "source_snippet": {
+                "type": "string"
+              },
+              "target_snippet": {
+                "type": "string"
+              }
+            }
+          },
+          "description": "Structured record of any adaptations made to imagery, examples, or metaphors."
+        },
+        "routing_decision": {
+          "type": "string",
+          "description": "Routing result, e.g., 'cultural_review_required', 'no_cultural_review', 'sample_review'."
+        },
+        "metadata": {
+          "type": "object",
+          "description": "Additional metadata specific to the cultural workflow (e.g., applied prompt template name)."
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "expert_annotation_record": {
+      "type": "object",
+      "required": [
+        "source_id",
+        "condition",
+        "workload",
+        "annotator_id",
+        "market",
+        "cultural_issue_present",
+        "cultural_severity_score",
+        "subjective_cultural_fit_score"
+      ],
+      "properties": {
+        "source_id": {
+          "type": "string"
+        },
+        "condition": {
+          "type": "string",
+          "enum": [
+            "baseline",
+            "treatment"
+          ]
+        },
+        "workload": {
+          "type": "string"
+        },
+        "annotator_id": {
+          "type": "string"
+        },
+        "market": {
+          "type": "string"
+        },
+        "cultural_issue_present": {
+          "type": "boolean",
+          "description": "True if the annotator identifies at least one cultural problem."
+        },
+        "cultural_severity_score": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4,
+          "description": "0\u20134 scale for severity of worst issue identified."
+        },
+        "subjective_cultural_fit_score": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 7,
+          "description": "1\u20137 rating of how natural and locally resonant the content is."
+        },
+        "issue_categories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Categories such as 'stereotype', 'taboo_topic', 'tone_mismatch', 'misaligned_metaphor'."
+        },
+        "comments": {
+          "type": "string",
+          "description": "Free-text qualitative feedback from the expert."
+        }
+      }
+    },
+    "user_study_record": {
+      "type": "object",
+      "required": [
+        "participant_id",
+        "source_id",
+        "condition",
+        "workload",
+        "market",
+        "task_success",
+        "user_trust_score",
+        "time_to_comprehension"
+      ],
+      "properties": {
+        "participant_id": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "condition": {
+          "type": "string",
+          "enum": [
+            "baseline",
+            "treatment"
+          ]
+        },
+        "workload": {
+          "type": "string"
+        },
+        "market": {
+          "type": "string"
+        },
+        "task_success": {
+          "type": "boolean",
+          "description": "True if the participant completed the assigned task correctly."
+        },
+        "user_trust_score": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 7,
+          "description": "1\u20137 Likert rating of trust in the content/brand."
+        },
+        "time_to_comprehension": {
+          "type": "number",
+          "description": "Time in seconds from exposure to correct answer or self-declared understanding."
+        },
+        "device_type": {
+          "type": "string",
+          "description": "Optional; e.g., 'mobile', 'desktop'."
+        },
+        "metadata": {
+          "type": "object",
+          "description": "Any additional anonymized contextual data collected during the study."
+        }
+      }
+    },
+    "reviewer_effort_record": {
+      "type": "object",
+      "required": [
+        "source_id",
+        "condition",
+        "workload",
+        "market",
+        "reviewer_id",
+        "review_time_minutes"
+      ],
+      "properties": {
+        "source_id": {
+          "type": "string"
+        },
+        "condition": {
+          "type": "string",
+          "enum": [
+            "baseline",
+            "treatment"
+          ]
+        },
+        "workload": {
+          "type": "string"
+        },
+        "market": {
+          "type": "string"
+        },
+        "reviewer_id": {
+          "type": "string"
+        },
+        "review_time_minutes": {
+          "type": "number",
+          "description": "Total time spent by the reviewer on this item."
+        },
+        "actions_taken": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "List of review actions (e.g., 'approved', 'edited_for_culture', 'escalated')."
+        }
+      }
+    },
+    "metrics_summary_record": {
+      "type": "object",
+      "required": [
+        "metric_name",
+        "condition",
+        "workload",
+        "market",
+        "value",
+        "unit",
+        "n_samples"
+      ],
+      "properties": {
+        "metric_name": {
+          "type": "string"
+        },
+        "condition": {
+          "type": "string",
+          "enum": [
+            "baseline",
+            "treatment"
+          ]
+        },
+        "workload": {
+          "type": "string"
+        },
+        "market": {
+          "type": "string"
+        },
+        "value": {
+          "type": "number"
+        },
+        "unit": {
+          "type": "string"
+        },
+        "n_samples": {
+          "type": "integer"
+        },
+        "confidence_interval": {
+          "type": "object",
+          "properties": {
+            "lower": {
+              "type": "number"
+            },
+            "upper": {
+              "type": "number"
+            },
+            "level": {
+              "type": "number",
+              "description": "Confidence level, e.g., 0.95."
+            }
+          }
+        },
+        "statistical_test": {
+          "type": "object",
+          "properties": {
+            "test_name": {
+              "type": "string"
+            },
+            "p_value": {
+              "type": "number"
+            },
+            "effect_size": {
+              "type": "number"
+            }
+          },
+          "description": "Optional; populated when comparing baseline vs treatment."
+        }
+      }
+    }
+  }
+}

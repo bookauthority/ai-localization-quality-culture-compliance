@@ -1,0 +1,11 @@
+id,source_text,source_locale,content_type,metadata
+cs_001,"Hello {user_name}, your ticket <b>{ticket_id}</b> is now open.",en-US,support_ticket,
+cs_002,"We have received your request about {product_name}.",en-US,support_ticket,
+cs_003,"Click <a href='https://example.com'>here</a> to view details.",en-US,support_ticket,
+cs_004,"Bonjour, this ticket includes some French words.",en-US,support_ticket,
+cs_005,"Hola, this ticket includes some Spanish words.",en-US,support_ticket,
+cs_006,"System message: retry in 5 minutes.",en-US,system_message,
+cs_007,"Dear {user_name}, please update your payment method.",en-US,support_ticket,
+cs_008,"Your subscription for {product_name} will expire soon.",en-US,support_ticket,
+cs_009,"Warning: unexpected error occurred in module <i>{module_name}</i>.",en-US,system_message,
+cs_010,"Thank you for contacting support about {product_name}.",en-US,support_ticket,

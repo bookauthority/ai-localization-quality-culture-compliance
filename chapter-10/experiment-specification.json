@@ -1,0 +1,714 @@
+{
+  "experiment_id": "exp-ch10-routing-orchestration-cicd-001",
+  "hypothesis": "A configuration-driven routing and orchestration layer, deployed via CI/CD with feature flags and canary releases, will (a) reduce p95 end-to-end localization latency and (b) improve throughput per dollar at peak load, without materially increasing error rates or incident frequency, compared to a baseline pipeline with hard-coded routing and ad hoc deployments.",
+  "baseline": {
+    "description": "Existing or minimally viable localization pipeline with static routing logic embedded in application code and manual or ad hoc deployments.",
+    "architecture": {
+      "routing": "Hard-coded if/else logic for risk, language, and content type inside a monolithic service or script.",
+      "orchestration": "Synchronous calls (e.g., REST chain) without a workflow engine or queue; no explicit state machine.",
+      "deployment": "Manual or semi-manual deployments (e.g., direct pushes to main or manual container image updates) without dedicated localization-specific CI/CD stages.",
+      "feature_flags": "None or coarse-grained toggles at application restart; no per-locale or per-segment flags.",
+      "canary_releases": "None; new routing logic and model versions go live to 100% of traffic immediately.",
+      "resilience": "Best-effort retries with default library settings; no circuit breakers, backoff policies, or bulkheading.",
+      "observability": "Basic request logging and coarse latency metrics; no per-stage breakdown or per-route telemetry."
+    },
+    "configuration": {
+      "routing_rules": "Embedded in code; changes require a code change and full redeploy.",
+      "risk_model": "Simplistic classification (e.g., boolean high_risk flag) or content type only; no combined multi-attribute routing.",
+      "supported_languages": "Fixed list in code; no dynamic additions via configuration."
+    }
+  },
+  "treatment": {
+    "description": "Configuration-driven routing and orchestration layer, integrated with a workflow engine/queue, deployed via CI/CD with feature flags, canary releases, and explicit resilience patterns.",
+    "architecture": {
+      "routing": "Dedicated routing service (e.g., Python FastAPI or similar) that evaluates a configuration-driven rule engine using YAML/JSON rules for risk, language, content type, and channel.",
+      "orchestration": "Workflow engine or orchestrator (e.g., Temporal, Airflow, Argo Workflows, or Step Functions) plus a message queue (e.g., SQS, Pub/Sub, RabbitMQ) to manage asynchronous stages: ingest \u2192 classify \u2192 route \u2192 localize \u2192 QA \u2192 deliver.",
+      "deployment": "CI/CD pipelines (e.g., GitHub Actions) with build, test, staging, and production steps; promotion gated on load/performance tests and smoke tests for routing rules.",
+      "feature_flags": "Configurable flags (e.g., using a feature flag service or config file) that can enable/disable specific routes, models, or workflows per language, risk level, content type, and traffic percentage.",
+      "canary_releases": "Per-route canary policies; a small configurable percentage of matching traffic is routed to new workflows or models first, with automated rollback on metric regressions.",
+      "resilience": "Explicit resilience patterns (e.g., exponential backoff, circuit breakers, timeouts, dead-letter queues) applied at each external dependency (MT/LLM providers, QA services).",
+      "observability": "Structured per-stage logging and tracing (correlation IDs), metrics for each workflow state, and per-route dashboards for latency, errors, and cost."
+    },
+    "configuration": {
+      "routing_rules": "Externalized YAML/JSON-based rules defining decision trees on risk, language, content_type, and channel, including fallback routes and human-in-the-loop escalations.",
+      "risk_model": "Configurable mapping from inputs (e.g., regulatory tags, content source) to risk categories that drive different workflows (e.g., `high_risk_pharma_label` vs `low_risk_marketing_banner`).",
+      "supported_languages": "Languages and per-language workflows defined in configuration, enabling additions/removals via config-only changes deployed through CI/CD."
+    }
+  },
+  "workloads": [
+    {
+      "name": "WL1-high-risk-product-docs",
+      "description": "High-risk, regulated product documentation and labeling content (e.g., pharmaceutical patient leaflets, financial disclosures).",
+      "input_profile": {
+        "volume": "5,000\u201310,000 segments per run, each 100\u2013400 words.",
+        "languages": [
+          "fr-FR",
+          "de-DE",
+          "es-ES",
+          "ja-JP"
+        ],
+        "channels": [
+          "product_docs",
+          "regulatory_portal"
+        ],
+        "content_types": [
+          "labeling",
+          "safety_info",
+          "legal_disclosure"
+        ],
+        "risk_level": "high",
+        "arrival_pattern": "Bursty: large batches during planned releases plus occasional urgent hotfix segments."
+      },
+      "routing_expectation": {
+        "baseline": "Single high-risk workflow regardless of channel or language; full human review hard-coded.",
+        "treatment": "Risk-based and channel-aware routing: mandatory human-in-the-loop for most; but specific low-impact sections (e.g., boilerplate legal) may use lighter QA routes as defined in configuration."
+      }
+    },
+    {
+      "name": "WL2-low-risk-marketing-and-ui",
+      "description": "Lower-risk marketing content and product UI strings for a web or SaaS product.",
+      "input_profile": {
+        "volume": "20,000\u201350,000 segments per run; UI strings 5\u201315 words, marketing snippets 20\u201380 words.",
+        "languages": [
+          "fr-FR",
+          "de-DE",
+          "es-MX",
+          "pt-BR",
+          "zh-CN"
+        ],
+        "channels": [
+          "marketing_web",
+          "product_ui"
+        ],
+        "content_types": [
+          "short_copy",
+          "cta_button",
+          "tooltip"
+        ],
+        "risk_level": "low_to_medium",
+        "arrival_pattern": "Near-continuous trickle with periodic spikes aligned to product releases and campaigns."
+      },
+      "routing_expectation": {
+        "baseline": "Uniform MT workflow with optional batch human review; no differentiation by channel or business priority.",
+        "treatment": "Config-driven routing that uses lighter workflows (e.g., automated QA only) for low-risk UI strings and optional canary routes for new MT models or prompts on a percentage of traffic."
+      }
+    },
+    {
+      "name": "WL3-peak-load-stress-test",
+      "description": "Synthetic peak-volume workload simulating large simultaneous multi-channel updates (e.g., major product launch or regulatory deadline).",
+      "input_profile": {
+        "volume": "100,000\u2013300,000 segments in a compressed time window (e.g., 30\u201360 minutes).",
+        "languages": [
+          "en-GB",
+          "fr-FR",
+          "de-DE",
+          "es-ES",
+          "it-IT",
+          "ja-JP",
+          "ko-KR",
+          "zh-CN"
+        ],
+        "channels": [
+          "product_docs",
+          "marketing_web",
+          "support_kb"
+        ],
+        "content_types": [
+          "mixed"
+        ],
+        "risk_level": "mixed",
+        "arrival_pattern": "Highly concurrent submissions from multiple simulated services; resembles worst-case traffic scenario."
+      },
+      "routing_expectation": {
+        "baseline": "Best-effort synchronous processing with increased timeouts and potential request failures or timeouts under load.",
+        "treatment": "Queue-based ingestion with backpressure, scalable workers, prioritized processing (e.g., high-risk docs before marketing), and resilience patterns to preserve SLOs."
+      }
+    }
+  ],
+  "controls": {
+    "data": {
+      "dataset": "Use the same underlying content segments for baseline and treatment, drawn from the chapter 5 baseline dataset extended for chapter 10 (stored in the repository under `/data/ch10_routing_orchestration/`).",
+      "train_test_split": "No model training is part of this experiment; however, random seeds and sampling for load generation must be fixed across baseline and treatment (e.g., `SEED=42`)."
+    },
+    "environment": {
+      "infrastructure": "Same cloud region, VM/container instance types, autoscaling settings, and network configuration for baseline and treatment.",
+      "dependencies": "Identical versions of MT/LLM APIs, QA services, and supporting libraries; pinned via requirements.txt/poetry.lock and container images.",
+      "secrets": "Same API keys and quotas across conditions; ensure no rate limiting differences."
+    },
+    "routing_inputs": {
+      "classification": "Use the same upstream content classification (risk, channel, content_type) inputs for both baseline and treatment; only routing/orchestration behavior may differ.",
+      "localization_logic": "Do not change underlying translation models or QA rules between baseline and treatment during this experiment; isolate the effect of routing, orchestration, and CI/CD deployment practices."
+    },
+    "run_conditions": {
+      "time_window": "Run baseline and treatment experiments in close temporal proximity to minimize external fluctuations (e.g., within the same 24-hour period).",
+      "parallelism": "If executing baseline and treatment concurrently, ensure isolation of resources or clear accounting for resource sharing; preferred approach is sequential runs with cooldown periods."
+    }
+  },
+  "metrics": [
+    {
+      "name": "end_to_end_latency_p50",
+      "unit": "seconds_per_segment",
+      "description": "Median latency from content ingestion to localized artifact ready for consumption."
+    },
+    {
+      "name": "end_to_end_latency_p95",
+      "unit": "seconds_per_segment",
+      "description": "95th percentile latency from content ingestion to localized artifact, emphasizing tail performance under load."
+    },
+    {
+      "name": "throughput",
+      "unit": "segments_per_minute",
+      "description": "Sustained processing rate for each workload during steady-state operation."
+    },
+    {
+      "name": "cost_per_segment",
+      "unit": "usd_per_segment",
+      "description": "Estimated total cost per segment, including MT/LLM API usage, QA services, and proportional infrastructure costs."
+    },
+    {
+      "name": "error_rate",
+      "unit": "fraction",
+      "description": "Fraction of segments that fail to complete successfully due to technical errors (HTTP 5xx, workflow failures, timeouts beyond retries) or are routed to dead-letter queues."
+    },
+    {
+      "name": "rollback_events",
+      "unit": "count_per_experiment_run",
+      "description": "Number of times a deployment or canary route had to be rolled back due to metric regression or incident."
+    },
+    {
+      "name": "incident_rate",
+      "unit": "count_per_experiment_run",
+      "description": "Number of distinct incidents recorded (e.g., SEV2+ workflow or routing incidents) during or immediately after the experiment run."
+    },
+    {
+      "name": "routing_accuracy",
+      "unit": "fraction",
+      "description": "Fraction of segments that follow the intended route as defined by the experiment's ground-truth routing policy (e.g., high-risk content must pass through human review checkpoints)."
+    },
+    {
+      "name": "queue_depth_p95",
+      "unit": "segments",
+      "description": "95th percentile depth of key queues (ingest, localization, QA) during peak load, as a proxy for system stress and backpressure management."
+    }
+  ],
+  "success_criteria": {
+    "primary": [
+      {
+        "description": "Treatment improves or maintains tail latency and throughput compared to baseline without increasing error rate.",
+        "conditions": [
+          "For each workload (WL1, WL2, WL3), treatment end_to_end_latency_p95 <= baseline end_to_end_latency_p95 * 1.05 (no more than 5% worse) and at least one workload shows >= 10% improvement.",
+          "For each workload, treatment throughput >= baseline throughput * 1.10 (at least 10% higher) OR maintains throughput with significantly reduced queue_depth_p95 (>= 20% reduction).",
+          "For each workload, treatment error_rate <= baseline error_rate * 1.10 (no more than 10% increase) and no absolute error_rate > 0.03 (3%)."
+        ]
+      }
+    ],
+    "secondary": [
+      {
+        "description": "Treatment reduces cost per segment or improves cost efficiency.",
+        "conditions": [
+          "For at least one workload, treatment cost_per_segment <= baseline cost_per_segment * 0.95 (at least 5% lower) OR demonstrates improved throughput at equal cost (throughput increase >= 10% at +/- 2% cost_per_segment)."
+        ]
+      },
+      {
+        "description": "Treatment improves operational safety and control.",
+        "conditions": [
+          "routing_accuracy in treatment >= 0.98 for high-risk routes in WL1.",
+          "rollback_events_treatment >= 1 across experiments OR capability to perform automated rollback is validated via deliberate canary failure injection.",
+          "incident_rate_treatment <= incident_rate_baseline + 1 (allowing minor issues during initial adoption) and no SEV1 incidents attributable to routing/orchestration defects."
+        ]
+      }
+    ],
+    "acceptance": "Experiment is considered successful if all primary criteria are met and at least one secondary criterion is met without violating operational safety (no SEV1 incidents or compliance-critical routing errors)."
+  },
+  "failure_modes": [
+    {
+      "name": "misrouting_high_risk_content",
+      "description": "High-risk segments (e.g., regulatory docs) are incorrectly routed to low-control workflows (e.g., no human review) due to rule misconfiguration or classification errors.",
+      "detection": "Discrepancy between expected route (from ground-truth mapping) and actual route in logs; compliance or reviewer audits find missing checkpoints.",
+      "mitigation": "Add validation tests for routing rules in CI; enforce explicit whitelists for high-risk patterns that always require human-in-the-loop; implement runtime guardrails that prevent fully automated release for regulated channels."
+    },
+    {
+      "name": "queue_overload_and_starvation",
+      "description": "Under peak load, queues grow without bound or low-priority content starves high-risk workflows.",
+      "detection": "queue_depth_p95 significantly higher in treatment, SLA breaches for WL1 while WL2/3 continue consuming capacity.",
+      "mitigation": "Introduce queue priority mechanisms; rate-limit low-priority workloads; add autoscaling triggers on queue depth with upper bounds."
+    },
+    {
+      "name": "orchestrator_bottleneck",
+      "description": "Central workflow engine or routing service becomes a performance bottleneck, increasing latency and error rate.",
+      "detection": "High CPU/memory utilization on orchestrator nodes, increased orchestrator response times, timeouts on orchestration calls.",
+      "mitigation": "Scale out orchestrator instances; optimize workflow definitions; cache static decisions; use sharding or partitioning of workflows when possible."
+    },
+    {
+      "name": "feature_flag_or_canary_misconfiguration",
+      "description": "Incorrect feature flag settings route too much traffic to experimental workflows or prevent rollback.",
+      "detection": "Sudden spikes in error_rate or latency correlated with flag changes; discrepancies between intended and actual traffic allocations.",
+      "mitigation": "Introduce flag change approval and change logs; simulate flag configurations in staging; add guardrails that cap canary traffic (e.g., max 20%) without explicit override."
+    },
+    {
+      "name": "CI_CD_pipeline_regression",
+      "description": "New routing configurations or workflow definitions pass CI but break at runtime due to insufficient tests or environment drift.",
+      "detection": "Increased incident_rate immediately after deployments; failures in smoke/load tests; rollback_events triggered frequently.",
+      "mitigation": "Strengthen integration and end-to-end tests that cover routing trees; enforce blue/green or canary deployments for orchestrator and routing services; snapshot production configs before changes for quick rollback."
+    },
+    {
+      "name": "cost_explosion_under_treatment",
+      "description": "More sophisticated routing and resilience patterns inadvertently increase cost_per_segment (e.g., due to retries or extra QA passes).",
+      "detection": "treatment cost_per_segment > baseline cost_per_segment * 1.20; large share of cost attributed to retries or redundant stages.",
+      "mitigation": "Implement retry budgets and cost-aware routing heuristics; tune backoff and timeout settings; audit workflow paths for redundant steps."
+    }
+  ],
+  "required_environment": {
+    "code_repository": "https://github.com/bookauthority/ai-localization-quality-culture-compliance",
+    "directories": [
+      "/ch10_routing_orchestration/",
+      "/ch05_baseline_pipeline/",
+      "/infra/docker/",
+      "/infra/ci_cd/"
+    ],
+    "runtime": {
+      "language": "Python 3.10+ for workflow logic and routing services.",
+      "config_format": "YAML/JSON for routing rules and workflow definitions.",
+      "containerization": "Docker or compatible container runtime for orchestrator, routing service, and worker services."
+    },
+    "dependencies": {
+      "python_packages": "Listed in `ch10_routing_orchestration/requirements.txt` or `pyproject.toml` (e.g., FastAPI/Flask, pydantic, requests/httpx, orchestration SDK, queue client, logging and metrics libraries).",
+      "orchestration_tool": "One of: Temporal, Airflow, Argo Workflows, or AWS Step Functions. Experiment scripts should abstract specifics; exact choice must be recorded in evidence.",
+      "queue_service": "One of: AWS SQS, GCP Pub/Sub, RabbitMQ, or Kafka as defined in configuration.",
+      "monitoring": "Metrics backend (e.g., Prometheus, CloudWatch, Stackdriver) and centralized logging (e.g., ELK/Opensearch, Cloud Logging)."
+    },
+    "infrastructure": {
+      "environment_types": [
+        "staging: representative but smaller-scale environment for dry runs.",
+        "production-like: environment with capacity and configuration comparable to production for final experiment runs."
+      ],
+      "compute": "Kubernetes cluster or equivalent container orchestration environment OR VMs with container runtime; sufficient nodes to simulate peak load for WL3.",
+      "network": "Stable network connectivity to MT/LLM and QA providers; latency variations should be monitored."
+    },
+    "secrets_and_access": {
+      "secrets_manager": "Use a centralized secrets manager (e.g., AWS Secrets Manager, Vault) referenced in configuration; do not hardcode credentials.",
+      "permissions": "Experiment runner needs deployment permissions for staging and production-like environments, and read access to logs/metrics."
+    }
+  },
+  "run_instructions": [
+    "Clone the repository and check out the chapter 10 branch or tag (e.g., `git clone https://github.com/bookauthority/ai-localization-quality-culture-compliance.git && cd ai-localization-quality-culture-compliance && git checkout ch10-routing-orchestration`).",
+    "Build and start the baseline environment:\n  - Navigate to `/ch05_baseline_pipeline/`.\n  - Build Docker images: `docker compose build` (or equivalent script).\n  - Start services: `docker compose up -d`.\n  - Verify health endpoints for baseline services.",
+    "Prepare the experiment datasets:\n  - Ensure `/data/ch10_routing_orchestration/` contains workload definitions and input segments for WL1, WL2, WL3.\n  - Confirm that each segment has stable IDs and metadata (language, channel, content_type, risk_level).",
+    "Configure experiment settings:\n  - In `/ch10_routing_orchestration/config/experiment.yaml`, set:\n    - `workloads`: WL1, WL2, WL3 definitions and volumes.\n    - `seed`: fixed random seed (e.g., 42).\n    - `orchestrator_type` and `queue_type` consistent across baseline and treatment.\n    - `routing_ground_truth`: reference file mapping segments to expected routes for routing_accuracy computation.",
+    "Run baseline experiment:\n  - Use provided script, e.g., `python run_experiment.py --mode baseline --config config/experiment.yaml`.\n  - The runner should:\n    - Feed workloads into the baseline pipeline at configured arrival patterns.\n    - Collect per-segment timing, route (if any), errors, and cost data.\n    - Export results to `/results/ch10/baseline/{timestamp}/` as JSON/Parquet/CSV plus summary metrics.",
+    "Tear down or isolate baseline environment:\n  - `docker compose down` for baseline, or ensure resource separation if keeping it running.\n  - Archive baseline logs and metrics; record environment versions (container SHAs, git commit hash).",
+    "Build and start treatment environment:\n  - Navigate to `/ch10_routing_orchestration/`.\n  - Build images: `docker compose build`.\n  - Apply database or orchestrator migrations if needed (e.g., `alembic upgrade head`, `orchestratorctl apply workflows`).\n  - Start services: `docker compose up -d`.",
+    "Deploy routing configuration via CI/CD simulation:\n  - Commit or update routing rules in `config/routing_rules.yaml` and push to the experiment branch.\n  - Trigger CI/CD pipeline locally or via remote (e.g., `gh workflow run ch10-routing.yml`).\n  - Ensure pipeline stages: lint, unit tests (including routing rule tests), integration tests, deploy to staging, smoke test, deploy to production-like.",
+    "Enable feature flags and canary settings for treatment:\n  - Define flags in `config/feature_flags.yaml` (or external feature flag service) for:\n    - New routing paths (e.g., `use_workflow_high_risk_v2`).\n    - Canary percentages per workload.\n  - Start with low traffic percentages (e.g., 10%) for canary routes.",
+    "Run treatment experiment:\n  - Execute `python run_experiment.py --mode treatment --config config/experiment.yaml`.\n  - Confirm that:\n    - Same input segments and arrival patterns are used as in baseline (validated via segment IDs and seed).\n    - CI/CD pipeline logs deployment history for this run.\n  - Collect per-segment and per-stage telemetry; store under `/results/ch10/treatment/{timestamp}/`.",
+    "Monitor metrics during runs:\n  - Use dashboards or CLI tools to watch latency (p50/p95), throughput, error_rate, queue_depth, and incident/alert streams.\n  - If automated rollback triggers (e.g., due to p95 or error SLO violation), record the event ID and reason.",
+    "Post-run analysis:\n  - Run analysis notebook or script, e.g., `python analyze_results.py --baseline /results/ch10/baseline/{timestamp}/ --treatment /results/ch10/treatment/{timestamp}/`.\n  - Compute metrics specified in `metrics` for each workload and globally.\n  - Compute routing_accuracy by comparing actual routes vs. `routing_ground_truth`.",
+    "Document outcomes and environment details in a structured evidence artifact as per `evidence_schema` and store under `/results/ch10/evidence/{timestamp}.json`.",
+    "If failure modes are detected (e.g., misrouting, severe regressions), halt further canary expansion, roll back routing/orchestration changes, and open incident and change records referencing the experiment ID."
+  ],
+  "evidence_schema": {
+    "type": "object",
+    "required": [
+      "experiment_id",
+      "timestamp",
+      "git_commit",
+      "environment",
+      "workloads",
+      "conditions",
+      "baseline_metrics",
+      "treatment_metrics",
+      "comparative_analysis",
+      "routing_validation",
+      "deployments_and_rollbacks",
+      "incidents",
+      "interpretation"
+    ],
+    "properties": {
+      "experiment_id": {
+        "type": "string",
+        "description": "Identifier of the experiment; should match the top-level experiment_id."
+      },
+      "timestamp": {
+        "type": "string",
+        "format": "date-time",
+        "description": "ISO 8601 timestamp for when the experiment was completed."
+      },
+      "git_commit": {
+        "type": "string",
+        "description": "Git commit hash(es) for baseline and treatment code used in the experiment.",
+        "properties": {
+          "baseline": {
+            "type": "string"
+          },
+          "treatment": {
+            "type": "string"
+          }
+        }
+      },
+      "environment": {
+        "type": "object",
+        "description": "Description of infrastructure and orchestration tools used.",
+        "properties": {
+          "orchestrator_type": {
+            "type": "string"
+          },
+          "queue_type": {
+            "type": "string"
+          },
+          "cloud_provider": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "instance_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "workloads": {
+        "type": "array",
+        "description": "List of workloads included in the experiment and their parameters.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "volume": {
+              "type": "integer"
+            },
+            "arrival_pattern": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "conditions": {
+        "type": "object",
+        "description": "High-level conditions for baseline and treatment runs.",
+        "properties": {
+          "baseline": {
+            "type": "object",
+            "properties": {
+              "start_time": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "end_time": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          },
+          "treatment": {
+            "type": "object",
+            "properties": {
+              "start_time": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "end_time": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        }
+      },
+      "baseline_metrics": {
+        "type": "object",
+        "description": "Aggregated metrics for baseline runs per workload and overall.",
+        "properties": {
+          "per_workload": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "end_to_end_latency_p50": {
+                  "type": "number"
+                },
+                "end_to_end_latency_p95": {
+                  "type": "number"
+                },
+                "throughput": {
+                  "type": "number"
+                },
+                "cost_per_segment": {
+                  "type": "number"
+                },
+                "error_rate": {
+                  "type": "number"
+                },
+                "rollback_events": {
+                  "type": "integer"
+                },
+                "incident_rate": {
+                  "type": "integer"
+                },
+                "routing_accuracy": {
+                  "type": "number"
+                },
+                "queue_depth_p95": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "overall": {
+            "type": "object",
+            "properties": {
+              "end_to_end_latency_p95": {
+                "type": "number"
+              },
+              "throughput": {
+                "type": "number"
+              },
+              "cost_per_segment": {
+                "type": "number"
+              },
+              "error_rate": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      },
+      "treatment_metrics": {
+        "type": "object",
+        "description": "Aggregated metrics for treatment runs per workload and overall.",
+        "properties": {
+          "per_workload": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "end_to_end_latency_p50": {
+                  "type": "number"
+                },
+                "end_to_end_latency_p95": {
+                  "type": "number"
+                },
+                "throughput": {
+                  "type": "number"
+                },
+                "cost_per_segment": {
+                  "type": "number"
+                },
+                "error_rate": {
+                  "type": "number"
+                },
+                "rollback_events": {
+                  "type": "integer"
+                },
+                "incident_rate": {
+                  "type": "integer"
+                },
+                "routing_accuracy": {
+                  "type": "number"
+                },
+                "queue_depth_p95": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "overall": {
+            "type": "object",
+            "properties": {
+              "end_to_end_latency_p95": {
+                "type": "number"
+              },
+              "throughput": {
+                "type": "number"
+              },
+              "cost_per_segment": {
+                "type": "number"
+              },
+              "error_rate": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      },
+      "comparative_analysis": {
+        "type": "object",
+        "description": "Computed differences between baseline and treatment and whether success criteria were met.",
+        "properties": {
+          "per_workload": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "delta_end_to_end_latency_p95": {
+                  "type": "number",
+                  "description": "treatment - baseline"
+                },
+                "delta_throughput": {
+                  "type": "number"
+                },
+                "delta_cost_per_segment": {
+                  "type": "number"
+                },
+                "delta_error_rate": {
+                  "type": "number"
+                },
+                "success_flags": {
+                  "type": "object",
+                  "properties": {
+                    "primary_met": {
+                      "type": "boolean"
+                    },
+                    "secondary_met": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "overall_success": {
+            "type": "boolean",
+            "description": "True if overall experiment met defined success_criteria."
+          }
+        }
+      },
+      "routing_validation": {
+        "type": "object",
+        "description": "Results of validating actual routing decisions against expected ground truth.",
+        "properties": {
+          "ground_truth_source": {
+            "type": "string"
+          },
+          "violations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "segment_id": {
+                  "type": "string"
+                },
+                "expected_route": {
+                  "type": "string"
+                },
+                "actual_route": {
+                  "type": "string"
+                },
+                "risk_level": {
+                  "type": "string"
+                },
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "deployments_and_rollbacks": {
+        "type": "array",
+        "description": "List of deployments, canary promotions, and rollback events during the experiment.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "deployment_id": {
+              "type": "string"
+            },
+            "time": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "deploy",
+                "canary_start",
+                "canary_promotion",
+                "rollback"
+              ]
+            },
+            "reason": {
+              "type": "string"
+            },
+            "affected_components": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "incidents": {
+        "type": "array",
+        "description": "Operational incidents recorded during or immediately after experiment runs.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "incident_id": {
+              "type": "string"
+            },
+            "severity": {
+              "type": "string",
+              "enum": [
+                "SEV1",
+                "SEV2",
+                "SEV3",
+                "SEV4"
+              ]
+            },
+            "detected_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "resolved_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "root_cause": {
+              "type": "string"
+            },
+            "related_to_routing_orchestration": {
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "interpretation": {
+        "type": "object",
+        "description": "Human-authored interpretation of experiment results and implications for production adoption.",
+        "properties": {
+          "summary": {
+            "type": "string"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "adopt_treatment",
+              "refine_and_retry",
+              "reject_treatment"
+            ]
+          },
+          "justification": {
+            "type": "string"
+          },
+          "next_steps": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

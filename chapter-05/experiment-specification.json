@@ -1,0 +1,545 @@
+{
+  "experiment_id": "exp-ch05-baseline-ai-localization-pipeline-v1",
+  "hypothesis": "A minimal, containerized AI localization pipeline that combines deterministic language detection, MT/LLM translation with glossary hints, and basic automated QA (length, placeholder, and tag checks) can process a small but realistic enterprise content set end-to-end with zero hard failures (crashes, unhandled exceptions) and produce structurally valid outputs (no broken placeholders/tags) suitable for human review exports in at least two target languages.",
+  "baseline": {
+    "description": "A simple, linear localization script that reads English source strings from a CSV, calls a generic MT/LLM API for translation without terminology support, performs no automated structural QA, and writes a raw CSV of translations without any TMS-compatible segmentation or metadata.",
+    "key_characteristics": {
+      "architecture": "Single Python script, no modular package structure, no config files; direct in-code constants for file paths and API keys.",
+      "content_handling": "Assumes all input is English; no language detection or mixed-language handling.",
+      "translation": "Single MT/LLM provider, called with plain source text and target language; no glossary, no TM, no retries, no rate-limit handling.",
+      "qa_checks": "None beyond implicit API errors; does not check for length ratio, placeholder preservation, or tag integrity.",
+      "export_format": "Flat CSV with columns: id, source, target_<lang_code>; no segmentation, no per-locale files, no status fields.",
+      "observability": "Console logging only; no structured logs or run IDs.",
+      "reproducibility": "No containerization; no pinned dependencies; environment setup is ad hoc."
+    },
+    "repository_mapping": {
+      "repo_url": "https://github.com/bookauthority/ai-localization-quality-culture-compliance",
+      "proposed_location": "ch05_baseline_pipeline/01_baseline_naive_script.py",
+      "sample_data_dir": "ch05_baseline_pipeline/data/baseline_naive/",
+      "notes": "This baseline is primarily a pedagogical foil; it may be included in the repo as an anti-pattern example but is not the primary subject of this experiment."
+    }
+  },
+  "treatment": {
+    "description": "A baseline but production-shaped AI localization pipeline implemented as a small Python package and CLI, with explicit stages for content ingestion, language detection, MT/LLM-based translation with terminology hints, basic automated QA checks, and export of outputs in a TMS-like format. The pipeline is containerized, environment-pinned, and designed to be reproducible on a sample dataset.",
+    "key_characteristics": {
+      "architecture": "Modular Python package with clear stage boundaries: ingest -> detect_language -> translate -> qa -> export. Configuration via YAML; separate data, config, and code directories.",
+      "content_handling": "Ingestion from CSV/JSON files with fields: id, source_text, source_locale, content_type, placeholders, tags. Language detection stage verifies or infers source language for each record, flagging inconsistencies.",
+      "translation": "Pluggable translation backend with a default provider (e.g., OpenAI or generic MT API) called through a single adapter interface. Terminology support via glossary hints injected into prompts or provider-specific glossary parameters. Deterministic settings where possible (temperature, top_p).",
+      "qa_checks": "Length ratio checks (target/source within configurable bounds per locale), placeholder integrity checks (all required placeholders present and unaltered), and HTML/XML tag balance checks (no unclosed or mismatched tags). Items failing QA are marked with status and QA error codes.",
+      "export_format": "TMS-like CSV or TSV with columns including: segment_id, source_locale, target_locale, source_text, target_text, content_type, qa_status, qa_issues, glossary_applied, run_id, created_at. Optionally, XLIFF-like JSON for future extension.",
+      "observability": "Structured logging (JSON lines) with per-run UUID, stage timings, and error summaries written to logs/ directory.",
+      "reproducibility": "Dockerfile, requirements.txt/pyproject.toml, and a deterministic configuration file (YAML). External MT/LLM provider and models are declared in config, not hard-coded."
+    },
+    "repository_mapping": {
+      "repo_url": "https://github.com/bookauthority/ai-localization-quality-culture-compliance",
+      "proposed_location": "ch05_baseline_pipeline/",
+      "key_files": {
+        "package": "ch05_baseline_pipeline/pipeline/",
+        "cli_entrypoint": "ch05_baseline_pipeline/run_pipeline.py",
+        "config_example": "ch05_baseline_pipeline/config/baseline_en_to_es_fr.yml",
+        "sample_dataset": "ch05_baseline_pipeline/data/sample_customer_support_en.csv",
+        "glossary": "ch05_baseline_pipeline/data/glossary_en_es_fr.csv",
+        "dockerfile": "ch05_baseline_pipeline/Dockerfile",
+        "env_example": "ch05_baseline_pipeline/.env.example"
+      }
+    }
+  },
+  "workloads": [
+    {
+      "name": "sample_customer_support_tickets",
+      "description": "A small but realistic set of anonymized English customer support ticket snippets for a SaaS product, including UI references, placeholders, and simple markup. Chosen for medium risk and high structural variety.",
+      "input_format": "CSV",
+      "input_schema": {
+        "id": "string; unique segment identifier (e.g., ticket_snippet_001)",
+        "source_text": "string; may include placeholders like {user_name}, {product_name}, and simple HTML tags <b>, <i>, <a>",
+        "source_locale": "string; BCP-47 code such as 'en-US'",
+        "content_type": "string; e.g., 'support_ticket', 'system_message'",
+        "metadata": "optional JSON-encoded string for future extension (e.g., 'risk_level', 'channel')"
+      },
+      "size": {
+        "num_segments": 150,
+        "avg_chars_per_segment": 160
+      },
+      "languages": {
+        "source_locales": [
+          "en-US"
+        ],
+        "target_locales": [
+          "es-ES",
+          "fr-FR"
+        ]
+      },
+      "special_features": [
+        "5\u201310% of content includes inline HTML tags.",
+        "20\u201330% of content includes placeholders like {user_name}, {ticket_id}, {product_name}.",
+        "A small subset (e.g., 5\u201310 segments) intentionally includes mixed-language elements (English with isolated Spanish or French terms) to test language detection robustness."
+      ]
+    },
+    {
+      "name": "sample_marketing_snippets",
+      "description": "Short marketing and product UI snippets for a regulated B2B SaaS product, focusing on segmentation and tag handling rather than high domain risk.",
+      "input_format": "CSV",
+      "input_schema": {
+        "id": "string; unique segment ID",
+        "source_text": "string; UI and marketing snippets, including line breaks and occasionally markdown-like formatting (e.g., **bold**).",
+        "source_locale": "string; 'en-US'",
+        "content_type": "string; 'marketing', 'product_ui'",
+        "metadata": "optional JSON string"
+      },
+      "size": {
+        "num_segments": 80,
+        "avg_chars_per_segment": 60
+      },
+      "languages": {
+        "source_locales": [
+          "en-US"
+        ],
+        "target_locales": [
+          "es-ES",
+          "fr-FR"
+        ]
+      },
+      "special_features": [
+        "Designed to verify that short and long segments both pass through the pipeline cleanly.",
+        "Some strings include non-breaking spaces or unusual punctuation to test tag/placeholder parsing robustness."
+      ]
+    }
+  ],
+  "controls": {
+    "fixed_parameters": {
+      "mt_llm_provider": "Configured via environment variable and YAML (e.g., OPENAI or GENERIC_MT_API), but fixed for a given experiment run.",
+      "mt_model": "Single model ID per experiment (e.g., 'gpt-4.1-mini' or 'generic-mt-v1'); no dynamic model switching.",
+      "temperature": 0.0,
+      "top_p": 1.0,
+      "max_tokens_per_segment": 512,
+      "source_locales": [
+        "en-US"
+      ],
+      "target_locales": [
+        "es-ES",
+        "fr-FR"
+      ],
+      "glossary_application_mode": "Soft enforcement via prompt or provider glossary hints; same glossary for all segments in a given run."
+    },
+    "randomness_and_seeding": {
+      "python_random_seed": 42,
+      "numpy_random_seed": 42,
+      "mt_llm_determinism": "Use deterministic settings (temperature=0, top_p=1); note that some external providers may still be nondeterministic across calls or time.",
+      "ordering": "Process segments in ascending id order to ensure reproducible ordering of outputs."
+    },
+    "environmental_controls": {
+      "container": "All primary runs executed inside the provided Docker image built from ch05_baseline_pipeline/Dockerfile.",
+      "python_version": "3.11.x (pinned in Dockerfile and pyproject/requirements).",
+      "dependency_lock": "requirements.txt or equivalent lock file committed in the repo, installed at image build time.",
+      "resource_limits": {
+        "cpu": "At least 2 vCPUs available to container",
+        "memory": "At least 4 GiB RAM available to container"
+      },
+      "network": "Outbound HTTPS access to chosen MT/LLM provider; otherwise no special connectivity requirements."
+    },
+    "dataset_versioning": {
+      "dataset_tag": "ch05-baseline-v1",
+      "checksum_method": "SHA256 checksums stored in ch05_baseline_pipeline/data/checksums.json",
+      "immutability": "Input datasets used for experiments must not be modified in-place; any change requires a new dataset_tag and associated experiment_id."
+    }
+  },
+  "metrics": [
+    {
+      "name": "segments_total",
+      "unit": "count",
+      "description": "Total number of input segments passed into the pipeline for a given run (per dataset and per target locale)."
+    },
+    {
+      "name": "segments_successfully_translated",
+      "unit": "count",
+      "description": "Number of segments for which a target text was generated without API or internal processing errors."
+    },
+    {
+      "name": "segments_failed_translation",
+      "unit": "count",
+      "description": "Number of segments for which translation could not be produced (e.g., API error, timeout, unrecoverable exception)."
+    },
+    {
+      "name": "segments_passing_all_qa",
+      "unit": "count",
+      "description": "Number of translated segments that pass all automated QA checks (length ratio, placeholder integrity, tag integrity)."
+    },
+    {
+      "name": "segments_failing_any_qa",
+      "unit": "count",
+      "description": "Number of translated segments that fail one or more QA checks and are flagged for human review or remediation."
+    },
+    {
+      "name": "qa_failure_rate",
+      "unit": "proportion",
+      "description": "Proportion of translated segments that fail at least one QA check: segments_failing_any_qa / segments_successfully_translated."
+    },
+    {
+      "name": "placeholder_integrity_violation_rate",
+      "unit": "proportion",
+      "description": "Proportion of translated segments that fail placeholder integrity checks (missing, altered, or additional placeholders) among those that contain placeholders in the source."
+    },
+    {
+      "name": "tag_integrity_violation_rate",
+      "unit": "proportion",
+      "description": "Proportion of translated segments that fail HTML/XML tag integrity checks (unbalanced or mismatched tags) among those containing tags in the source."
+    },
+    {
+      "name": "length_ratio_out_of_bounds_rate",
+      "unit": "proportion",
+      "description": "Proportion of translated segments where the target-to-source character length ratio falls outside configured bounds for that language pair."
+    },
+    {
+      "name": "pipeline_end_to_end_time",
+      "unit": "seconds",
+      "description": "Wall-clock time from pipeline start (after environment ready) to completion of export for all target locales for a given workload."
+    },
+    {
+      "name": "avg_translation_latency_per_segment",
+      "unit": "milliseconds_per_segment",
+      "description": "Average latency measured only for the translation stage per segment (including retries)."
+    },
+    {
+      "name": "hard_failure_indicator",
+      "unit": "boolean",
+      "description": "Binary indicator of whether any unhandled exception or crash occurred that prevented completion of the pipeline for a given run."
+    }
+  ],
+  "success_criteria": {
+    "primary": [
+      {
+        "name": "no_hard_failures",
+        "criterion": "hard_failure_indicator == false for all workloads and target locales in at least three independent runs (fresh containers, same config).",
+        "rationale": "Baseline pipeline must be robust enough to complete jobs consistently without crashes."
+      },
+      {
+        "name": "structural_integrity",
+        "criterion": "placeholder_integrity_violation_rate <= 0.02 and tag_integrity_violation_rate <= 0.02 for each workload-target_locale combination.",
+        "rationale": "Even a baseline must preserve structural elements (placeholders and tags) nearly perfectly to be usable by enterprise teams."
+      }
+    ],
+    "secondary": [
+      {
+        "name": "manageable_qa_failure_rate",
+        "criterion": "qa_failure_rate <= 0.15 for each workload-target_locale combination.",
+        "rationale": "The baseline pipeline should not overwhelm human reviewers with excessive QA failures; ~85% clean pass is a reasonable initial target."
+      },
+      {
+        "name": "completion_time_expectation",
+        "criterion": "pipeline_end_to_end_time <= 300 seconds for 150-segment workloads across both target locales combined, on the reference hardware.",
+        "rationale": "Ensures that the baseline is fast enough to be practical in interactive development and small-batch testing contexts."
+      }
+    ],
+    "interpretation_notes": [
+      "If structural integrity thresholds are not met while language quality appears reasonable, the next iteration should prioritize improvements in placeholder and tag handling over model tuning.",
+      "If qa_failure_rate is driven primarily by length ratio violations rather than structural errors, reviewers may decide to relax bounds or differentiate by content_type."
+    ]
+  },
+  "failure_modes": [
+    {
+      "name": "api_instability_or_rate_limits",
+      "description": "External MT/LLM provider returns intermittent errors, timeouts, or rate-limit responses, causing segments_failed_translation to spike or causing hard_failure_indicator to flip to true.",
+      "detection": "Increased segments_failed_translation count; structured logs showing HTTP 429/5xx patterns; pipeline abort logs.",
+      "mitigations": [
+        "Implement exponential backoff and bounded retries in the translation adapter.",
+        "Allow batch size and concurrency controls to be configured in YAML.",
+        "Offer a dry-run mode that stops before translation for quick structural checks of ingestion and QA logic."
+      ]
+    },
+    {
+      "name": "incorrect_language_detection",
+      "description": "Language detection misclassifies some segments, leading to incorrect translation routing (e.g., treating an already-Spanish snippet as English).",
+      "detection": "Compare detected language codes against known source_locale where available; count mismatches; flag segments where detection_confidence < threshold.",
+      "mitigations": [
+        "For Ch.05 baseline, keep detection simple but configurable: allow bypass when source_locale is trusted.",
+        "Log all detection mismatches and include them as qa_issues for potential human review, but do not block pipeline completion."
+      ]
+    },
+    {
+      "name": "placeholder_parsing_errors",
+      "description": "Placeholder regex or parser fails to correctly identify placeholders, either missing valid ones or hallucinating placeholders from normal text.",
+      "detection": "Manual spot checks of qa_issues labeled 'placeholder_missing' or 'placeholder_extra'; unit tests on synthetic strings; unexpectedly high placeholder_integrity_violation_rate.",
+      "mitigations": [
+        "Use explicit placeholder patterns (e.g., {SNAKE_CASE} or {camelCase}) and document constraints in the dataset description.",
+        "Implement unit tests for placeholder extraction logic under tests/ subdirectory.",
+        "Log the list of extracted placeholders per segment for debugging."
+      ]
+    },
+    {
+      "name": "html_tag_validation_false_positives",
+      "description": "The tag integrity checker flags benign differences (e.g., whitespace or attribute order changes) as errors.",
+      "detection": "High tag_integrity_violation_rate with visually correct translations; log samples where violations occur; manual inspection.",
+      "mitigations": [
+        "Restrict baseline to simple tag sets (<b>, <i>, <a>) and perform structural rather than byte-level comparison.",
+        "Normalize whitespace and attribute ordering before comparison where feasible.",
+        "Document current limitations and defer complex markup handling to later chapters."
+      ]
+    },
+    {
+      "name": "non_reproducible_results_across_runs",
+      "description": "Same configuration and dataset produce materially different results across runs (e.g., different placeholder errors, large swings in qa_failure_rate).",
+      "detection": "Run the same workload-target combination at least three times and compare metrics and sample outputs; check for config drift or unpinned dependencies.",
+      "mitigations": [
+        "Ensure deterministic settings for the MT/LLM provider to the extent supported.",
+        "Pin dependency versions strictly and rebuild the Docker image before each experiment series.",
+        "Persist config and model identifiers in the run metadata and export schema."
+      ]
+    }
+  ],
+  "required_environment": {
+    "software": {
+      "python": "3.11.x",
+      "os": "Linux (Ubuntu 22.04 LTS recommended) or equivalent container base image",
+      "dependencies": "Installed via `pip install -r requirements.txt` inside the Docker image. Likely libraries include: requests or httpx, pydantic, pyyaml, pandas, langdetect or fasttext-based detector, lxml or html5lib for tag parsing, loguru or stdlib logging, click or typer for CLI.",
+      "container_runtime": "Docker Engine 20.x or higher (or compatible, such as Podman, with minor modifications)."
+    },
+    "services": {
+      "mt_llm_provider": "At least one MT/LLM API, e.g., OpenAI, Azure OpenAI, or a generic SaaS MT provider. The specific provider, base URL, and model ID must be documented in config.",
+      "network": "Outbound HTTPS connectivity from the container to the MT/LLM provider endpoint."
+    },
+    "credentials": {
+      "api_keys": "Environment variables such as MT_API_KEY or OPENAI_API_KEY set either directly or via docker --env-file (see .env.example).",
+      "secrets_handling": "No secrets committed to the repository; .env.example documents required keys and expected names."
+    },
+    "hardware_reference": {
+      "cpu": "2\u20134 vCPUs",
+      "memory": "4\u20138 GiB RAM",
+      "storage": "At least 2 GiB free disk space for images, logs, and outputs.",
+      "notes": "The small dataset sizes keep hardware requirements modest; metrics are relative to this reference environment."
+    }
+  },
+  "run_instructions": [
+    "Clone the repository:\n  git clone https://github.com/bookauthority/ai-localization-quality-culture-compliance.git\n  cd ai-localization-quality-culture-compliance/ch05_baseline_pipeline",
+    "Inspect the sample datasets and glossary:\n  ls data/\n  # e.g., sample_customer_support_en.csv, sample_marketing_snippets_en.csv, glossary_en_es_fr.csv",
+    "Review and, if needed, adapt the baseline configuration file (do not change dataset file names or structure for this experiment):\n  cat config/baseline_en_to_es_fr.yml\n  # Key fields: mt_provider, mt_model, target_locales, qa.length_ratio_bounds, paths.input_file, paths.output_dir, paths.log_dir.",
+    "Create an environment file with API credentials based on .env.example:\n  cp .env.example .env\n  # Edit .env to include your MT/LLM provider API keys and endpoints.",
+    "Build the Docker image for the baseline pipeline:\n  docker build -t ailoc-ch05-baseline:latest .",
+    "Run the baseline pipeline for the primary workload (customer support tickets) inside the container:\n  docker run --rm \\\n    --env-file .env \\\n    -v \"$(pwd)/outputs\":/app/outputs \\\n    -v \"$(pwd)/logs\":/app/logs \\\n    ailoc-ch05-baseline:latest \\\n    python run_pipeline.py \\\n      --config config/baseline_en_to_es_fr.yml \\\n      --input data/sample_customer_support_en.csv \\\n      --workload-name sample_customer_support_tickets",
+    "Optionally, run the pipeline for the secondary workload (marketing snippets):\n  docker run --rm \\\n    --env-file .env \\\n    -v \"$(pwd)/outputs\":/app/outputs \\\n    -v \"$(pwd)/logs\":/app/logs \\\n    ailoc-ch05-baseline:latest \\\n    python run_pipeline.py \\\n      --config config/baseline_en_to_es_fr.yml \\\n      --input data/sample_marketing_snippets_en.csv \\\n      --workload-name sample_marketing_snippets",
+    "For each run, locate the outputs and logs:\n  ls outputs/\n  # Expect files such as: sample_customer_support_tickets_es-ES.csv, sample_customer_support_tickets_fr-FR.csv\n  ls logs/\n  # Expect logs with run IDs and JSONL structured entries, e.g., run_2026-01-10T12-34-56Z.jsonl",
+    "Extract experiment metrics from logs using the provided helper script (if implemented) or manual inspection:\n  # If helper exists:\n  python tools/summarize_run_metrics.py --logs logs/run_*.jsonl --output outputs/metrics_summary.json\n  # Otherwise, inspect logs for per-run metrics blocks, and manually compute metrics such as qa_failure_rate and violation rates.",
+    "Repeat the entire pipeline run (steps 6\u20139) at least two more times with the same configuration and datasets to assess reproducibility. Compare metrics across runs to validate that hard_failure_indicator remains false and key rates (placeholder_integrity_violation_rate, tag_integrity_violation_rate, qa_failure_rate) are stable.",
+    "Export outputs for human review in a TMS-like format (this may already be the default CSV structure). Verify that the exported files include per-segment fields: segment_id, source_locale, target_locale, source_text, target_text, qa_status, qa_issues, and run_id. Archive these files under a directory named with experiment_id and dataset_tag for later chapters."
+  ],
+  "evidence_schema": {
+    "run_record": {
+      "type": "object",
+      "description": "Top-level record capturing a single execution of the baseline pipeline for a given workload and configuration.",
+      "required_fields": [
+        "experiment_id",
+        "run_id",
+        "timestamp_utc",
+        "git_commit_hash",
+        "dataset_tag",
+        "workload_name",
+        "config_path",
+        "mt_provider",
+        "mt_model",
+        "source_locales",
+        "target_locales",
+        "metrics",
+        "outputs_manifest"
+      ],
+      "properties": {
+        "experiment_id": {
+          "type": "string",
+          "example": "exp-ch05-baseline-ai-localization-pipeline-v1"
+        },
+        "run_id": {
+          "type": "string",
+          "description": "UUID or timestamp-based identifier generated at run start.",
+          "example": "run-2026-01-10T12-34-56Z-uuid4"
+        },
+        "timestamp_utc": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp for when the run started."
+        },
+        "git_commit_hash": {
+          "type": "string",
+          "description": "Short or full hash of the repository commit used for the run."
+        },
+        "dataset_tag": {
+          "type": "string",
+          "description": "Logical label for the dataset version used (e.g., 'ch05-baseline-v1')."
+        },
+        "workload_name": {
+          "type": "string",
+          "enum": [
+            "sample_customer_support_tickets",
+            "sample_marketing_snippets"
+          ]
+        },
+        "config_path": {
+          "type": "string",
+          "description": "Path to the YAML configuration file used for the run."
+        },
+        "mt_provider": {
+          "type": "string",
+          "description": "Identifier for the MT/LLM provider used (e.g., 'openai', 'generic_mt')."
+        },
+        "mt_model": {
+          "type": "string",
+          "description": "Model ID used for translation.",
+          "example": "gpt-4.1-mini"
+        },
+        "source_locales": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "target_locales": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "metrics": {
+          "type": "object",
+          "description": "Aggregate metrics for the run, potentially broken down by target_locale.",
+          "properties": {
+            "by_locale": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "segments_total": {
+                    "type": "integer"
+                  },
+                  "segments_successfully_translated": {
+                    "type": "integer"
+                  },
+                  "segments_failed_translation": {
+                    "type": "integer"
+                  },
+                  "segments_passing_all_qa": {
+                    "type": "integer"
+                  },
+                  "segments_failing_any_qa": {
+                    "type": "integer"
+                  },
+                  "qa_failure_rate": {
+                    "type": "number"
+                  },
+                  "placeholder_integrity_violation_rate": {
+                    "type": "number"
+                  },
+                  "tag_integrity_violation_rate": {
+                    "type": "number"
+                  },
+                  "length_ratio_out_of_bounds_rate": {
+                    "type": "number"
+                  },
+                  "pipeline_end_to_end_time": {
+                    "type": "number"
+                  },
+                  "avg_translation_latency_per_segment": {
+                    "type": "number"
+                  },
+                  "hard_failure_indicator": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "outputs_manifest": {
+          "type": "array",
+          "description": "List of generated output files and their metadata.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "file_path": {
+                "type": "string"
+              },
+              "target_locale": {
+                "type": "string"
+              },
+              "record_count": {
+                "type": "integer"
+              },
+              "checksum_sha256": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "segment_record": {
+      "type": "object",
+      "description": "Per-segment record as written to the TMS-like export for human review.",
+      "required_fields": [
+        "segment_id",
+        "source_locale",
+        "target_locale",
+        "source_text",
+        "target_text",
+        "qa_status"
+      ],
+      "properties": {
+        "segment_id": {
+          "type": "string"
+        },
+        "source_locale": {
+          "type": "string"
+        },
+        "target_locale": {
+          "type": "string"
+        },
+        "source_text": {
+          "type": "string"
+        },
+        "target_text": {
+          "type": "string"
+        },
+        "content_type": {
+          "type": "string"
+        },
+        "qa_status": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "fail"
+          ],
+          "description": "Outcome of automated QA checks for this segment."
+        },
+        "qa_issues": {
+          "type": "array",
+          "description": "List of machine-detected issues for this segment.",
+          "items": {
+            "type": "string",
+            "enum": [
+              "placeholder_missing",
+              "placeholder_extra",
+              "placeholder_modified",
+              "tag_unbalanced",
+              "tag_mismatched",
+              "length_ratio_out_of_bounds",
+              "language_detection_mismatch",
+              "mt_error"
+            ]
+          }
+        },
+        "glossary_applied": {
+          "type": "boolean",
+          "description": "Whether a glossary was applied or attempted for this segment."
+        },
+        "length_ratio": {
+          "type": "number",
+          "description": "target_length_chars / source_length_chars"
+        },
+        "run_id": {
+          "type": "string",
+          "description": "Foreign key linking the segment to a run_record.run_id."
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    }
+  }
+}

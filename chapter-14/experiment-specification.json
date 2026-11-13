@@ -1,0 +1,860 @@
+{
+  "experiment_id": "exp-ch14-scaling-observability-continuous-improvement-v1",
+  "hypothesis": "Adding standardized observability, risk-aware KPIs, and an experimentation framework (including A/B tests on localized variants and controlled rollout of new models/workflows) to the baseline AI localization pipeline will (a) improve localization quality and risk posture at constant or lower unit cost, and (b) enable safe capacity scaling without breaching latency or compliance-error SLOs.",
+  "baseline": {
+    "description": "Current state baseline pipeline as implemented in Chapter 5 with quality extensions from Chapter 6 but without systematic observability or experimentation capabilities.",
+    "characteristics": [
+      "Single active localization workflow per content type (no concurrent variant testing).",
+      "Minimal logging: request ID, timestamp, language pair, high-level status (success/failure), and generic error messages.",
+      "No structured quality/risk telemetry beyond ad hoc evaluation scripts; limited or no centralized metrics store.",
+      "No automated alerting for quality degradation, latency spikes, or compliance violations.",
+      "Static capacity configuration (e.g., fixed worker pool size, static rate limits for MT/LLM providers).",
+      "Manual, infrequent model/workflow changes with no controlled experiments or rollback criteria.",
+      "No systematic cost observability (e.g., per-locale cost per 1k words or per request)."
+    ]
+  },
+  "treatment": {
+    "description": "Enhanced pipeline with comprehensive instrumentation, monitoring, alerting, and an experimentation layer that supports concurrent workflows (models/prompts/routing) and A/B testing of localized variants on business KPIs.",
+    "changes": [
+      {
+        "area": "Instrumentation and logging",
+        "description": "Introduce structured, stage-level logging for the localization pipeline with a consistent schema and correlation IDs, including timing, quality, and risk-related fields.",
+        "details": [
+          "Correlation IDs propagated across all stages: ingestion, analysis, localization, QA, compliance, post-processing, delivery.",
+          "Structured logs (JSON) including: content_id, locale, content_type, risk_level, model_id, prompt_id or workflow_version, timestamps per stage, latency per stage, error codes, quality scores, compliance flags, and cost estimates.",
+          "Logs emitted both to stdout (for containerized environments) and to a centralized log sink (e.g., Elasticsearch, OpenSearch, or a metrics backend via exporters)."
+        ]
+      },
+      {
+        "area": "KPIs and metrics model",
+        "description": "Define and collect KPIs for localization performance, quality, risk, and cost, aligned with Chapters 6, 8, 9, 10, and this chapter\u2019s goals.",
+        "details": [
+          "Operational KPIs: p50/p95/p99 end-to-end latency per content_type and locale; throughput (requests/min); failure rate; retry rate.",
+          "Quality KPIs: automated quality score (e.g., COMET/BLEU-like metric or in-house scorer), human QA pass rate, rework rate (percentage of segments requiring human edit beyond threshold), compliance error rate per 1k segments.",
+          "Business KPIs for A/B: downstream engagement/conversion metrics where applicable (e.g., click-through rate (CTR), completion rate, error/contact rate in support flows).",
+          "Cost KPIs: estimated cost per 1k words by locale and risk_level, broken down by provider (MT/LLM), and human review cost (from external inputs)."
+        ]
+      },
+      {
+        "area": "Monitoring and alerting",
+        "description": "Build dashboards and alerts on top of the metric streams, with risk-sensitive thresholds.",
+        "details": [
+          "Define SLOs for latency (e.g., 95% of localization jobs for low-risk content complete in < 5s), quality (minimum automated quality score per segment/locale), and compliance (zero tolerance for specific violation classes in high-risk content).",
+          "Implement alerts for: SLO breaches, sudden drift in quality score distributions, spikes in compliance violations, cost anomalies (e.g., >X% increase in cost per 1k words day-over-day), and error-rate spikes.",
+          "Dashboards for per-locale and per-workflow health, including version overlays to visualize impact of changes."
+        ]
+      },
+      {
+        "area": "Experimentation and A/B framework",
+        "description": "Introduce an experimentation layer that supports random assignment of comparable inputs to different pipeline variants and integrates outcome tracking.",
+        "details": [
+          "Abstract a \"workflow_variant\" concept (e.g., baseline_model_v1, mt_engine_b, llm_prompt_v3, hybrid_with_memory) that encapsulates model selection, prompts, routing rules, and QA policies.",
+          "Randomized assignment at content or request level, stratified by locale and content_type, to maintain balance across variants.",
+          "Experiment configuration in YAML/JSON specifying traffic splits, preconditions (e.g., high vs low risk), primary metrics, and guardrail metrics.",
+          "Experiment state machine: DRAFT \u2192 RUNNING \u2192 PAUSED \u2192 COMPLETED with immutable logs of configuration and decision timestamps."
+        ]
+      },
+      {
+        "area": "Capacity planning and cost optimization",
+        "description": "Use collected metrics to guide scaling decisions and cost trade-offs.",
+        "details": [
+          "Collect per-stage, per-variant utilization metrics (e.g., queue lengths, worker utilization, provider API rate consumption).",
+          "Simulate or replay workload traces under different worker pool sizes and routing strategies using recorded logs.",
+          "Compute cost-performance frontiers (e.g., cost vs p95 latency vs quality score) for each workflow_variant to support executive decisions."
+        ]
+      }
+    ]
+  },
+  "workloads": [
+    {
+      "name": "workload-pharma-high-risk-labeling",
+      "description": "High-risk pharmaceutical labeling and patient information content in 3\u20135 target locales, with strong compliance and quality requirements.",
+      "inputs": {
+        "content_types": [
+          "patient_information_leaflets",
+          "drug_labeling_text",
+          "safety_communications"
+        ],
+        "locales": [
+          "en-US_to_de-DE",
+          "en-US_to_fr-FR",
+          "en-US_to_es-ES",
+          "en-US_to_it-IT"
+        ],
+        "risk_level": "high"
+      },
+      "selection_criteria": [
+        "Segments have existing human-reviewed ground truth translations for a subset of the corpus for quality evaluation.",
+        "Regulatory terminology is covered by existing termbases/controlled vocabularies.",
+        "Downstream business metrics may be limited; focus is on quality, latency, and compliance-signals telemetry."
+      ]
+    },
+    {
+      "name": "workload-finance-medium-risk-disclosures-marketing",
+      "description": "Regulated financial content mixing disclosures and marketing copy, where both accuracy and conversion matter.",
+      "inputs": {
+        "content_types": [
+          "product_disclosures",
+          "rate_sheets",
+          "marketing_landing_pages"
+        ],
+        "locales": [
+          "en-US_to_pt-BR",
+          "en-US_to_es-MX",
+          "en-US_to_fr-CA"
+        ],
+        "risk_level": "medium"
+      },
+      "selection_criteria": [
+        "Data includes click-through / sign-up / error-contact rates for localized variants (either historical or in a controlled test environment).",
+        "Existing human review or QA scores for at least part of the corpus."
+      ]
+    },
+    {
+      "name": "workload-saas-low-risk-ui-support",
+      "description": "B2B SaaS/consumer-tech UI strings and knowledge base articles, optimized for latency, throughput, and engagement.",
+      "inputs": {
+        "content_types": [
+          "ui_strings",
+          "support_kb_articles",
+          "in-app_notifications"
+        ],
+        "locales": [
+          "en-US_to_ja-JP",
+          "en-US_to_ko-KR",
+          "en-US_to_de-DE"
+        ],
+        "risk_level": "low"
+      },
+      "selection_criteria": [
+        "High volume and frequent updates, suitable for stress-testing scaling behavior.",
+        "Instrumentation available for downstream user behavior metrics (e.g., task completion, support contact deflection)."
+      ]
+    }
+  ],
+  "controls": {
+    "randomization": [
+      "Random assignment of content items to baseline vs treatment workflow_variants within each workload, stratified by locale and content_type.",
+      "Ensure minimum sample sizes per cell before evaluating effects (e.g., per-variant-per-locale)."
+    ],
+    "traffic_split": [
+      "Initial conservative split (e.g., 90% baseline / 10% treatment) for high-risk content with guardrail-based automatic rollback.",
+      "More aggressive splits allowed (e.g., 50%/50%) for low-risk workloads once guardrail monitoring is validated."
+    ],
+    "time_controls": [
+      "Run baseline and treatment concurrently over the same calendar periods to control for temporal effects and provider drift.",
+      "Avoid mixing data from materially different provider or system versions within the same experimental phase except as explicit variables."
+    ],
+    "data_leakage_and_bias_controls": [
+      "Ensure no overlapping segments across training/evaluation for any ML-based quality/compliance models used in observability.",
+      "Balance important strata (e.g., locale, channel, device, customer segment where available) between variants."
+    ],
+    "governance_controls": [
+      "Predefine acceptable risk boundaries for each workload (e.g., zero new critical compliance violations for high-risk sets).",
+      "Require sign-off from compliance or risk owner before enabling experiments for high-risk workloads."
+    ]
+  },
+  "metrics": [
+    {
+      "name": "end_to_end_latency_p95",
+      "unit": "milliseconds",
+      "description": "95th percentile end-to-end processing time from ingestion to ready-for-delivery per request."
+    },
+    {
+      "name": "stage_latency",
+      "unit": "milliseconds",
+      "description": "Latency per pipeline stage (ingestion, analysis, localization, QA, compliance, delivery) captured and stored with stage identifiers."
+    },
+    {
+      "name": "throughput_requests_per_minute",
+      "unit": "requests/minute",
+      "description": "Number of localization jobs successfully processed per minute per workload."
+    },
+    {
+      "name": "automated_quality_score_mean",
+      "unit": "dimensionless_score",
+      "description": "Mean automated quality score (e.g., COMET-like or custom scorer) per variant, locale, and workload."
+    },
+    {
+      "name": "human_qc_pass_rate",
+      "unit": "percentage",
+      "description": "Percentage of segments passing human quality control without major edits in sampled human-reviewed items."
+    },
+    {
+      "name": "rework_rate",
+      "unit": "percentage",
+      "description": "Percentage of segments that required edits beyond a pre-agreed threshold in human post-editing."
+    },
+    {
+      "name": "compliance_violation_rate",
+      "unit": "violations_per_1000_segments",
+      "description": "Detected compliance violations per 1,000 segments, separated into critical/major/minor categories."
+    },
+    {
+      "name": "incident_count_localization",
+      "unit": "incidents",
+      "description": "Number of recorded localization-related incidents (e.g., hotfixes, public corrections) per workload during the experiment window."
+    },
+    {
+      "name": "business_kpi_ctr",
+      "unit": "percentage",
+      "description": "Click-through rate for localized marketing or in-product promotional content where applicable."
+    },
+    {
+      "name": "business_kpi_conversion",
+      "unit": "percentage",
+      "description": "Conversion rate or task completion rate associated with localized flows (e.g., sign-ups, successful form submissions)."
+    },
+    {
+      "name": "business_kpi_support_contact_rate",
+      "unit": "contacts_per_1000_sessions",
+      "description": "Rate at which users exposed to a localized experience contact support or report issues."
+    },
+    {
+      "name": "cost_per_1000_source_words",
+      "unit": "currency_per_1000_words",
+      "description": "Estimated total cost per 1,000 source words, inclusive of MT/LLM usage and estimated human review cost, per variant and workload."
+    },
+    {
+      "name": "mt_llm_api_cost_share",
+      "unit": "percentage",
+      "description": "Share of total localization cost attributable to MT/LLM API calls."
+    },
+    {
+      "name": "system_error_rate",
+      "unit": "errors_per_1000_requests",
+      "description": "Rate of technical errors (timeouts, provider errors, internal exceptions) per 1,000 localization jobs."
+    },
+    {
+      "name": "alert_trigger_count",
+      "unit": "alerts",
+      "description": "Number of monitoring alerts triggered per category (latency, quality, compliance, cost) in the experiment period."
+    },
+    {
+      "name": "time_to_detect_issue",
+      "unit": "minutes",
+      "description": "Median time from underlying issue occurrence (e.g., a sustained quality drop) to alert firing, approximated via back-analysis."
+    },
+    {
+      "name": "time_to_mitigate_issue",
+      "unit": "minutes",
+      "description": "Median time from alert firing to mitigation action (e.g., rollback of a model, pausing a variant)."
+    }
+  ],
+  "success_criteria": {
+    "primary": [
+      {
+        "description": "Observability and experimentation framework enables safe scaling without degrading high-risk workload safety.",
+        "conditions": [
+          "For workload-pharma-high-risk-labeling: compliance_violation_rate in treatment variants is not statistically significantly higher than baseline at a predefined confidence level, with zero new critical violations attributed to treatment.",
+          "end_to_end_latency_p95 for high-risk workloads in treatment is no more than 10\u201315% worse than baseline, or any increase is justified by measurable quality improvements and approved by stakeholders."
+        ]
+      },
+      {
+        "description": "Quality and business-performance improvements for at least one non-high-risk workload at stable or lower cost per 1k words.",
+        "conditions": [
+          "For at least one of workload-finance-medium-risk-disclosures-marketing or workload-saas-low-risk-ui-support: automated_quality_score_mean and/or human_qc_pass_rate significantly improve in treatment compared with baseline, OR business KPIs (business_kpi_ctr, business_kpi_conversion, business_kpi_support_contact_rate) show statistically significant improvement in the desired direction.",
+          "cost_per_1000_source_words for the improved workload does not increase by more than a pre-agreed margin (e.g., 10%), unless explicitly justified by stakeholder-approved gain in risk posture or business KPI uplift."
+        ]
+      }
+    ],
+    "secondary": [
+      {
+        "description": "Improved operational resilience and issue response via observability.",
+        "conditions": [
+          "Reduction in time_to_detect_issue and time_to_mitigate_issue compared to pre-treatment historical baselines (where available) or against target thresholds agreed with SRE/operations.",
+          "alert_trigger_count is within expected ranges (neither zero due to under-sensitivity nor overwhelmingly noisy)."
+        ]
+      },
+      {
+        "description": "Actionable capacity and cost insights.",
+        "conditions": [
+          "Ability to produce capacity planning reports using logs/metrics that show measurable cost-performance trade-offs for varying worker pool sizes and routing strategies.",
+          "At least one concrete, data-backed proposal (documented outside the experiment) for cost optimization or scaling strategy derived from the experimental data."
+        ]
+      }
+    ],
+    "statistical_considerations": [
+      "Use appropriate statistical tests for primary effect estimates (e.g., two-sample t-test or non-parametric equivalent for continuous metrics, chi-square or Fisher's exact test for rates).",
+      "Predefine minimal detectable effect sizes, confidence levels (e.g., 95%), and corrections for multiple comparisons where necessary.",
+      "Ensure sample sizes per variant, per locale, and per workload are sufficient to avoid underpowered conclusions."
+    ]
+  },
+  "failure_modes": [
+    {
+      "name": "insufficient_volume_or_imbalance",
+      "description": "Not enough traffic or highly uneven assignment leads to inconclusive results or biased estimates.",
+      "mitigations": [
+        "Pre-run power analysis to estimate required sample sizes.",
+        "Monitor assignment counts in real time and adjust traffic splits or experiment duration as needed.",
+        "Consider aggregating across similar locales/content_types where domain experts deem it acceptable."
+      ]
+    },
+    {
+      "name": "uncontrolled_external_changes",
+      "description": "Vendor API changes, product releases, or major content mix shifts occur during the experiment and confound results.",
+      "mitigations": [
+        "Track provider versions and important configuration changes in experiment metadata.",
+        "Pause experiments during planned major releases, or treat such events as explicit experimental factors.",
+        "Segment analysis into stable and unstable sub-periods and interpret unstable results cautiously."
+      ]
+    },
+    {
+      "name": "logging_overhead_and_latency_regressions",
+      "description": "Enhanced instrumentation significantly increases latency or cost.",
+      "mitigations": [
+        "Benchmark with and without additional logging at low traffic levels before full roll-out.",
+        "Use sampling for verbose logs and adjust sampling rate based on risk level and workload.",
+        "Offload heavy processing (e.g., log aggregation) to asynchronous systems."
+      ]
+    },
+    {
+      "name": "alert_fatigue_and_noise",
+      "description": "Overly sensitive thresholds cause frequent false alerts, leading to desensitization.",
+      "mitigations": [
+        "Start with conservative thresholds and refine based on initial alert history.",
+        "Group related alerts and implement deduplication within configurable windows.",
+        "Include post-mortem reviews for major incidents to tune alert rules."
+      ]
+    },
+    {
+      "name": "inadvertent_exposure_of_high_risk_content_to_immature_variants",
+      "description": "Misconfiguration routes high-risk content to experimental variants without proper guardrails.",
+      "mitigations": [
+        "Enforce risk_level-based routing constraints at the orchestration layer with explicit allowlists of variants permitted for high-risk content.",
+        "Require governance sign-off and code reviews for changes touching risk routing.",
+        "Implement runtime checks that block or automatically reroute high-risk content when variants are in early experimental phases."
+      ]
+    },
+    {
+      "name": "metric_misinterpretation",
+      "description": "Stakeholders over-index on a single metric (e.g., cost) without understanding trade-offs with risk and quality.",
+      "mitigations": [
+        "Present dashboards and experiment reports with a balanced set of primary, secondary, and guardrail metrics.",
+        "Include narrative interpretations and caveats in experiment readouts.",
+        "Run review sessions with cross-functional stakeholders (localization, compliance, product) to contextualize results."
+      ]
+    }
+  ],
+  "required_environment": {
+    "codebase": "https://github.com/bookauthority/ai-localization-quality-culture-compliance",
+    "dependencies": {
+      "language": "Python 3.10+",
+      "environment_management": "Conda or virtualenv; Docker for containerized runs.",
+      "packages_example": [
+        "pydantic or dataclasses for log/metric schema definitions",
+        "requests or httpx for MT/LLM API calls",
+        "pandas, numpy for analytics",
+        "scikit-learn or statsmodels for statistical tests",
+        "prometheus_client or OpenTelemetry SDK for metrics export",
+        "uvicorn/fastapi or Flask (if running pipeline as a service)",
+        "pytest for basic test coverage of instrumentation and routing logic"
+      ],
+      "external_services": [
+        "At least one MT and/or LLM provider compatible with earlier chapters (e.g., via HTTPS APIs).",
+        "Metrics backend and visualization stack (e.g., Prometheus + Grafana, or equivalent APM/logging platform).",
+        "Optional: message queue / workflow engine (e.g., Celery, Argo, Airflow, Temporal) consistent with Chapter 10."
+      ]
+    },
+    "configuration": {
+      "config_files": [
+        "config/observability.yaml (metric collection rules, sampling rates, endpoints).",
+        "config/experiments.yaml (experiment definitions, variants, traffic splits, guardrails).",
+        "config/pipeline.yaml (pipeline stages, routing rules, risk-level mappings)."
+      ],
+      "secrets_management": [
+        "Use environment variables or a secrets manager (e.g., Vault, AWS Secrets Manager) for provider API keys.",
+        "Ensure logs do not contain PII or sensitive data; use hashing or tokenization where necessary."
+      ]
+    },
+    "datasets": [
+      "Sample high-, medium-, and low-risk localization datasets as introduced and used in earlier chapters (5, 6, 8, 9, 11), with metadata including content_type, locale, risk_level, and if available, human reference translations and historical business metrics.",
+      "Synthetic or anonymized datasets may be added for capacity and stress testing where actual content is not available."
+    ],
+    "topology": [
+      "Local development environment for dry runs and integration tests.",
+      "Staging environment that mirrors production-like topology for running the experiment with synthetic or low-risk traffic first.",
+      "Production or production-like environment with real traffic for final experimental evaluation, subject to governance approvals."
+    ]
+  },
+  "run_instructions": [
+    "1. Environment setup",
+    "   - Clone the repository and create the experiment-specific branch (e.g., ch14-observability-experiment).",
+    "   - Create and activate a Python environment, install dependencies from the provided requirements.txt or environment.yml.",
+    "   - Configure MT/LLM provider credentials via environment variables or secrets manager.",
+    "   - Stand up (or connect to) metrics and logging backends (e.g., Prometheus & Grafana, OpenSearch).",
+    "2. Dataset preparation",
+    "   - Load the sample datasets defined for workloads (pharma, finance, SaaS) with associated metadata (content_id, locale, content_type, risk_level).",
+    "   - For evaluation purposes, ensure reference translations and human QA annotations are accessible where they exist.",
+    "   - For business KPI A/B tests, either (a) integrate with a sandbox environment simulating user interactions, or (b) wire metrics collection into production systems, subject to governance approval.",
+    "3. Instrumentation integration",
+    "   - Integrate or enable the structured logging module at each pipeline stage, ensuring correlation IDs propagate end-to-end.",
+    "   - Configure the metrics exporters to expose operational, quality, and cost metrics with appropriate labels (locale, workload, workflow_variant, risk_level).",
+    "   - Validate that logs and metrics appear in the chosen backend with correct schemas by running a small set of localization jobs.",
+    "4. Experiment configuration",
+    "   - Define workflow variants in config/experiments.yaml, for example: baseline_model_v1, llm_prompt_tuned_v2, hybrid_with_memory_v1.",
+    "   - Specify, for each workload, the traffic split between baseline and each treatment variant, along with primary and guardrail metrics, minimal sample sizes, and experiment duration hints.",
+    "   - Encode risk-based routing constraints, ensuring high-risk workloads only use approved variants.",
+    "5. Dry runs in staging",
+    "   - Run the pipeline in a staging environment with synthetic or replayed traffic, using the new observability and experimentation layer.",
+    "   - Verify assignment logic (distribution of workflow_variants), correctness of metrics and logs, and functioning alerts using injected failure scenarios.",
+    "   - Adjust configuration (sampling rates, alert thresholds, logging verbosity) based on staging results.",
+    "6. Launch controlled experiment",
+    "   - Deploy the instrumented pipeline and experiment configuration into the target environment (production or production-like).",
+    "   - Start the experiment via the experiment controller (script or service) that writes an immutable experiment record including timestamps, variants, and splits.",
+    "   - Continuously monitor high-level dashboards for signs of misconfiguration or unexpected behavior, especially for high-risk workloads.",
+    "7. Ongoing monitoring and guardrail checks",
+    "   - Set up automatic checks that compare key guardrail metrics (e.g., compliance_violation_rate, system_error_rate) between baseline and treatments over rolling windows.",
+    "   - If pre-defined thresholds are breached (e.g., treatment compliance_violation_rate > baseline by X and exceeds absolute threshold), automatically pause or roll back the offending variant.",
+    "   - Document any incidents, including timestamps and mitigating actions, for later analysis.",
+    "8. Data collection and freeze",
+    "   - Allow the experiment to run until pre-agreed sample sizes and/or time duration are reached per workload and variant.",
+    "   - Once sufficient data are collected, mark the experiment as COMPLETED; avoid configuration changes to the experiment during the analysis phase.",
+    "   - Extract logs and metrics for the experiment window into an analysis-friendly format (e.g., Parquet/CSV in a data lake or analytics workspace).",
+    "9. Analysis",
+    "   - For each workload and variant, compute primary and guardrail metrics (quality, latency, compliance, cost, business KPIs).",
+    "   - Apply statistical tests according to the predefined plan, taking into account stratification factors such as locale and content_type.",
+    "   - Visualize time series for key metrics to inspect for non-stationarity or drift over the experiment period.",
+    "   - Summarize findings in a standardized experiment report JSON document conforming to the evidence_schema (see below).",
+    "10. Decision and change management",
+    "   - Present experiment results to the cross-functional review group (localization, compliance, product/marketing, engineering).",
+    "   - Decide whether to: promote any treatment variant to become the new baseline, iterate on variants for another experiment cycle, or roll back experimental changes.",
+    "   - Update routing, SLOs, runbooks, and documentation to reflect accepted changes, including capacity and cost planning recommendations.",
+    "11. Retrospective and continuous improvement",
+    "   - Review what worked and what did not in terms of observability, experimentation processes, and decision-making.",
+    "   - Adjust KPIs, metrics collection, alert rules, and experiment governance policies based on lessons learned.",
+    "   - Incorporate successful patterns into quarterly review cadences and broader platform evolution plans."
+  ],
+  "evidence_schema": {
+    "type": "object",
+    "required": [
+      "experiment_metadata",
+      "workload_results",
+      "variant_comparisons",
+      "guardrail_outcomes",
+      "statistical_analysis",
+      "operational_observations",
+      "decision_and_followups"
+    ],
+    "properties": {
+      "experiment_metadata": {
+        "type": "object",
+        "required": [
+          "experiment_id",
+          "name",
+          "description",
+          "start_time",
+          "end_time",
+          "variants",
+          "traffic_splits",
+          "environments",
+          "config_commit_hash"
+        ],
+        "properties": {
+          "experiment_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "start_time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "end_time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "variants": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "variant_id",
+                "description",
+                "pipeline_config_ref",
+                "risk_constraints"
+              ],
+              "properties": {
+                "variant_id": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "pipeline_config_ref": {
+                  "type": "string"
+                },
+                "risk_constraints": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "traffic_splits": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "workload_name",
+                "variant_id",
+                "percentage"
+              ],
+              "properties": {
+                "workload_name": {
+                  "type": "string"
+                },
+                "variant_id": {
+                  "type": "string"
+                },
+                "percentage": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "environments": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "config_commit_hash": {
+            "type": "string"
+          }
+        }
+      },
+      "workload_results": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "workload_name",
+            "locale",
+            "variant_id",
+            "sample_size",
+            "metrics"
+          ],
+          "properties": {
+            "workload_name": {
+              "type": "string"
+            },
+            "locale": {
+              "type": "string"
+            },
+            "variant_id": {
+              "type": "string"
+            },
+            "sample_size": {
+              "type": "integer"
+            },
+            "metrics": {
+              "type": "object",
+              "properties": {
+                "end_to_end_latency_p95": {
+                  "type": "number"
+                },
+                "throughput_requests_per_minute": {
+                  "type": "number"
+                },
+                "automated_quality_score_mean": {
+                  "type": "number"
+                },
+                "human_qc_pass_rate": {
+                  "type": "number"
+                },
+                "rework_rate": {
+                  "type": "number"
+                },
+                "compliance_violation_rate": {
+                  "type": "number"
+                },
+                "incident_count_localization": {
+                  "type": "integer"
+                },
+                "business_kpi_ctr": {
+                  "type": "number"
+                },
+                "business_kpi_conversion": {
+                  "type": "number"
+                },
+                "business_kpi_support_contact_rate": {
+                  "type": "number"
+                },
+                "cost_per_1000_source_words": {
+                  "type": "number"
+                },
+                "mt_llm_api_cost_share": {
+                  "type": "number"
+                },
+                "system_error_rate": {
+                  "type": "number"
+                },
+                "alert_trigger_count": {
+                  "type": "integer"
+                },
+                "time_to_detect_issue": {
+                  "type": "number"
+                },
+                "time_to_mitigate_issue": {
+                  "type": "number"
+                }
+              },
+              "additionalProperties": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      },
+      "variant_comparisons": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "workload_name",
+            "locale",
+            "baseline_variant_id",
+            "treatment_variant_id",
+            "metric_differences"
+          ],
+          "properties": {
+            "workload_name": {
+              "type": "string"
+            },
+            "locale": {
+              "type": "string"
+            },
+            "baseline_variant_id": {
+              "type": "string"
+            },
+            "treatment_variant_id": {
+              "type": "string"
+            },
+            "metric_differences": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "metric_name",
+                  "baseline_value",
+                  "treatment_value",
+                  "absolute_difference",
+                  "relative_difference"
+                ],
+                "properties": {
+                  "metric_name": {
+                    "type": "string"
+                  },
+                  "baseline_value": {
+                    "type": "number"
+                  },
+                  "treatment_value": {
+                    "type": "number"
+                  },
+                  "absolute_difference": {
+                    "type": "number"
+                  },
+                  "relative_difference": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "guardrail_outcomes": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "workload_name",
+            "variant_id",
+            "guardrail_metric",
+            "threshold",
+            "observed_value",
+            "breach",
+            "actions"
+          ],
+          "properties": {
+            "workload_name": {
+              "type": "string"
+            },
+            "variant_id": {
+              "type": "string"
+            },
+            "guardrail_metric": {
+              "type": "string"
+            },
+            "threshold": {
+              "type": "number"
+            },
+            "observed_value": {
+              "type": "number"
+            },
+            "breach": {
+              "type": "boolean"
+            },
+            "actions": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "statistical_analysis": {
+        "type": "object",
+        "properties": {
+          "tests": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "workload_name",
+                "locale",
+                "metric_name",
+                "baseline_variant_id",
+                "treatment_variant_id",
+                "test_type",
+                "p_value",
+                "effect_size",
+                "confidence_interval"
+              ],
+              "properties": {
+                "workload_name": {
+                  "type": "string"
+                },
+                "locale": {
+                  "type": "string"
+                },
+                "metric_name": {
+                  "type": "string"
+                },
+                "baseline_variant_id": {
+                  "type": "string"
+                },
+                "treatment_variant_id": {
+                  "type": "string"
+                },
+                "test_type": {
+                  "type": "string"
+                },
+                "p_value": {
+                  "type": "number"
+                },
+                "effect_size": {
+                  "type": "number"
+                },
+                "confidence_interval": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2
+                }
+              }
+            }
+          },
+          "multiple_comparison_correction": {
+            "type": "string"
+          },
+          "interpretation_summary": {
+            "type": "string"
+          }
+        }
+      },
+      "operational_observations": {
+        "type": "object",
+        "properties": {
+          "incidents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "timestamp",
+                "workload_name",
+                "variant_id",
+                "description",
+                "impact",
+                "resolution"
+              ],
+              "properties": {
+                "timestamp": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "workload_name": {
+                  "type": "string"
+                },
+                "variant_id": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "impact": {
+                  "type": "string"
+                },
+                "resolution": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "alert_summary": {
+            "type": "string"
+          },
+          "observability_gaps": {
+            "type": "string"
+          }
+        }
+      },
+      "decision_and_followups": {
+        "type": "object",
+        "required": [
+          "overall_conclusion",
+          "variant_decisions",
+          "change_management_actions",
+          "next_experiments"
+        ],
+        "properties": {
+          "overall_conclusion": {
+            "type": "string"
+          },
+          "variant_decisions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "variant_id",
+                "decision",
+                "rationale"
+              ],
+              "properties": {
+                "variant_id": {
+                  "type": "string"
+                },
+                "decision": {
+                  "type": "string"
+                },
+                "rationale": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "change_management_actions": {
+            "type": "string"
+          },
+          "next_experiments": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

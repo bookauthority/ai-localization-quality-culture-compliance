@@ -1,0 +1,851 @@
+{
+  "experiment_id": "ch06-operationalizing-quality-metrics-eval-feedback-v1",
+  "hypothesis": "Compared to a baseline AI localization pipeline with minimal QA (length/tag checks only) and a single MT/LLM configuration, an enhanced pipeline that (1) adds automated linguistic and functional quality checks, (2) ingests structured human review feedback, (3) uses these signals to tune prompts and select MT engines per language/content type, and (4) exposes quality metrics via a dashboard will improve human-rated localization quality scores by at least 10% relative (at comparable cost and latency), while maintaining zero critical functional or compliance defects on high\u2011risk content.",
+  "baseline": {
+    "description": "Baseline AI localization pipeline implemented in Chapter 5, extended only as needed for logging compatibility but without advanced quality instrumentation or adaptive routing.",
+    "pipeline_characteristics": {
+      "translation": "Single MT/LLM provider and a single prompt/configuration used for all languages and content types.",
+      "qa_checks": [
+        "Length ratio checks between source and target (e.g., flag if outside [0.7, 1.8]).",
+        "Placeholder and formatting tag preservation checks (e.g., ICU, HTML tags)."
+      ],
+      "human_review": {
+        "process": "Optional ad hoc review; no standardized rubric or structured capture of errors and severities.",
+        "integration": "Human edits are not automatically fed back into any model, routing, or analytics process."
+      },
+      "logging_and_metrics": {
+        "logs": "Request/response logs for translation only (source, target, language pair, model ID, timestamp).",
+        "metrics": "No computed quality scores beyond binary pass/fail on basic QA checks."
+      },
+      "governance": {
+        "thresholds": "No formal quality thresholds; release decisions are manual and not tied to measured metrics.",
+        "routing": "No model or prompt routing based on content type, risk, or historical quality."
+      }
+    },
+    "code_location": "https://github.com/bookauthority/ai-localization-quality-culture-compliance/tree/main/experiments/ch06/baseline",
+    "configuration_files": [
+      "experiments/ch06/baseline/config/pipeline.baseline.yaml"
+    ]
+  },
+  "treatment": {
+    "description": "Enhanced quality-aware localization pipeline that adds automated linguistic and functional quality scoring, structured human review capture, quality dashboards, and adaptive selection of MT engines/prompts per language and content type based on experiment results.",
+    "pipeline_characteristics": {
+      "translation": {
+        "engines": [
+          "Engine_A (e.g., general-purpose MT model)",
+          "Engine_B (e.g., domain-adapted MT model or LLM with localization prompt)"
+        ],
+        "prompts_and_configs": [
+          "Prompt_A_baseline: generic translation instructions.",
+          "Prompt_B_quality_tuned: instructions that emphasize terminology adherence, tone, and regulatory sensitivity."
+        ],
+        "routing": "Initial 50/50 random assignment between Engine_A/Prompt_A_baseline and Engine_B/Prompt_B_quality_tuned within each workload for experiment runs; post\u2011experiment, routing rules can be updated based on quality metrics by language and content type."
+      },
+      "qa_checks": {
+        "linguistic": [
+          "BLEU/ChrF/METEOR or equivalent lexical similarity metrics where reference translations exist.",
+          "Automatic quality estimation (QE) score from an external service or in-repo model (0\u20131 or 0\u2013100 scale).",
+          "Terminology adherence checks against a provided termbase (missing or incorrect term usage per 1,000 words)."
+        ],
+        "functional": [
+          "Placeholders/tags preservation (as in baseline, but quantified as error rate).",
+          "Length constraints by channel (e.g., UI string truncation risk based on max_length metadata).",
+          "Basic locale formatting checks for numbers, dates, currencies where annotated in the source."
+        ],
+        "risk_and_compliance_pre_flags": [
+          "PII or sensitive token detection for high\u2011risk content types (e.g., pharma, finance) using rule-based patterns or a classifier.",
+          "Toxicity or prohibited term detection for marketing/support content."
+        ]
+      },
+      "human_review": {
+        "rubric": "Standardized human evaluation form capturing segment-level and document-level scores across dimensions: Accuracy, Fluency, Terminology, Style/Tone, Functional Correctness, and Compliance/Cultural Risk.",
+        "scales": {
+          "segment_level": "0\u20133 or 0\u20135 Likert per dimension with optional free\u2011text comments.",
+          "document_level": "0\u2013100 overall quality score and go/no\u2011go decision."
+        },
+        "error_typology": "Controlled set of error categories and severities (e.g., MQM-like: Accuracy, Fluency, Terminology, Style, Locale Convention, Formatting, Other; severities: Minor, Major, Critical).",
+        "tooling": "Simple web UI or CSV/JSON templates; all human feedback is stored in a structured schema compatible with automated aggregation and dashboarding.",
+        "feedback_loop_usage": [
+          "Aggregate human scores per engine/prompt/language/content_type to update routing rules.",
+          "Optionally generate few-shot prompt examples from human\u2011corrected segments for subsequent prompt tuning (not required for initial experiment run)."
+        ]
+      },
+      "logging_and_metrics": {
+        "logs": "Unified pipeline logs including: request metadata (content_type, risk_level, language_pair, market), engine_id, prompt_id, automated metrics, human scores (if available), QA failures, and release decision.",
+        "dashboard": "Simple quality dashboard built using Python (e.g., Plotly, Dash, or Jupyter notebooks) over pipeline logs, showing metric distributions, trends, and engine/prompt comparisons."
+      },
+      "governance": {
+        "thresholds": "Explicit numeric thresholds for acceptable automated QE score and human quality score by risk_level and content_type (e.g., high\u2011risk legal content must achieve no Critical errors and minimum human score of 90/100).",
+        "go_no_go_rules": "Programmatic rules that compute a go/no\u2011go flag per asset based on aggregated metrics; these flags can be consumed by downstream CI/CD or release automation."
+      }
+    },
+    "code_location": "https://github.com/bookauthority/ai-localization-quality-culture-compliance/tree/main/experiments/ch06/treatment",
+    "configuration_files": [
+      "experiments/ch06/treatment/config/pipeline.treatment.yaml",
+      "experiments/ch06/treatment/config/quality_thresholds.yaml",
+      "experiments/ch06/treatment/config/engines_and_prompts.yaml"
+    ]
+  },
+  "workloads": [
+    {
+      "id": "w1-ui_product_strings",
+      "description": "Medium-risk product UI strings (short labels, tooltips, error messages) sourced from a mock SaaS application.",
+      "content_characteristics": {
+        "length_profile": "Short segments (1\u201380 characters).",
+        "risk_level": "Medium (brand and functional correctness are important; limited regulatory exposure).",
+        "formatting": "High density of placeholders and tags (e.g., {count}, %s, HTML spans)."
+      },
+      "languages": [
+        "en->fr",
+        "en->de",
+        "en->es"
+      ],
+      "dataset_source": "Repository directory: data/ch06/workloads/ui_strings/*.jsonl",
+      "sampling_strategy": "Randomly sample at least 500 segments per language pair; split into 80% for automated-only evaluation and 20% for human review.",
+      "assignment_to_variants": "Within each language pair, randomly assign segments 50/50 to baseline and treatment pipelines while ensuring placeholders and key message types are evenly distributed."
+    },
+    {
+      "id": "w2-marketing_pages",
+      "description": "Low-to-medium risk marketing content (web pages, emails, and in-app marketing copy) for a hypothetical B2B SaaS product.",
+      "content_characteristics": {
+        "length_profile": "Paragraph- to page-length content; 50\u20131,000 words per unit.",
+        "risk_level": "Low/Medium (brand and cultural appropriateness critical; low direct regulatory risk).",
+        "formatting": "Mixed HTML and markdown with links, headings, and emphasis."
+      },
+      "languages": [
+        "en->fr",
+        "en->ja",
+        "en->pt-BR"
+      ],
+      "dataset_source": "Repository directory: data/ch06/workloads/marketing_pages/*.jsonl",
+      "sampling_strategy": "At least 100 documents per language pair; all documents are run through both variants. A 30% stratified subset is sent for human review with a focus on culturally sensitive segments.",
+      "assignment_to_variants": "Use paired evaluation: each document is translated by both baseline and treatment pipelines for side-by-side human comparison using randomized blind presentation."
+    },
+    {
+      "id": "w3-high_risk_regulated_docs",
+      "description": "High-risk regulated content, such as mock pharmaceutical patient information leaflets, safety communications, or financial disclosures.",
+      "content_characteristics": {
+        "length_profile": "Documents of 1,000\u20133,000 words with structured headings and tables.",
+        "risk_level": "High (accuracy, terminology, and compliance-critical, with zero tolerance for critical functional or legal errors).",
+        "formatting": "Tables, bullet lists, dosage or numeric values, and references to regulatory concepts."
+      },
+      "languages": [
+        "en->fr",
+        "en->de"
+      ],
+      "dataset_source": "Repository directory: data/ch06/workloads/high_risk_regulated/*.jsonl",
+      "sampling_strategy": "At least 50 documents per language pair. All documents go through automated QA in both baseline and treatment; at least 50% of documents are subject to human review.",
+      "assignment_to_variants": "Documents are split 50/50 between baseline and treatment for initial experiment runs to limit reviewer load; for a smaller calibration subset (e.g., 10 docs per language), both variants are produced for blind side-by-side human comparison."
+    }
+  ],
+  "controls": {
+    "randomization": {
+      "seed": 42,
+      "description": "All assignments of segments/documents to baseline vs. treatment and to engine/prompt variants within the treatment pipeline use a fixed random seed (42) to ensure reproducibility. Randomization code is centralized in a helper module.",
+      "module": "experiments/ch06/common/randomization.py"
+    },
+    "data_splits": {
+      "train_dev_test": "This experiment is evaluation-only; no model training occurs by default. If QE or other models require calibration, clearly separate calibration data from evaluation data and document these choices.",
+      "fixed_eval_set": "Once defined, the evaluation dataset (IDs of segments/documents in each workload) must not be modified across experiment runs; updates require bumping the experiment version ID."
+    },
+    "human_review_procedure": {
+      "blinding": "Reviewers see anonymized system outputs labeled only as System_X and System_Y when comparing baseline vs. treatment or engines/prompts; they do not know which is which.",
+      "rotation": "Where feasible, multiple reviewers evaluate overlapping subsets of content to measure inter\u2011annotator agreement.",
+      "instructions": "Reviewers receive a standardized instruction document (stored in docs/ch06/human_eval_instructions.md) and a short calibration exercise with gold examples before formal scoring."
+    },
+    "environment": {
+      "api_stability": "Use fixed versions or pinned configurations for external MT/LLM/QE APIs where possible (e.g., model name and date/time stamped in config).",
+      "rate_limits": "Throttle requests to stay within provider rate limits and keep experimental timing comparable across variants."
+    },
+    "execution_order": {
+      "batching": "Run baseline and treatment on interleaved batches of content to mitigate time-of-day and service-load effects (e.g., process alternating segments/documents per variant).",
+      "retries": "Apply identical retry logic for transient API failures across both variants; log retries explicitly."
+    }
+  },
+  "metrics": [
+    {
+      "name": "human_overall_quality_score",
+      "unit": "0-100 points per document",
+      "description": "Document-level human rating of overall localization quality, combining accuracy, fluency, terminology, style, functional correctness, and compliance/cultural adequacy. For analysis, compute mean and confidence intervals by variant, language, content_type, and risk_level."
+    },
+    {
+      "name": "human_go_no_go_rate",
+      "unit": "proportion",
+      "description": "Proportion of documents for which human reviewers mark the translation as acceptable for release (go) vs. requiring substantial revision (no-go), stratified by workload and variant."
+    },
+    {
+      "name": "mqm_like_error_rate",
+      "unit": "errors per 1,000 source words by severity",
+      "description": "Number of human\u2011annotated errors per 1,000 source words grouped by category (Accuracy, Fluency, Terminology, Style, Locale, Formatting, Other) and severity (Minor, Major, Critical)."
+    },
+    {
+      "name": "critical_error_incidence",
+      "unit": "proportion of documents with \u22651 critical error",
+      "description": "Fraction of evaluated documents containing at least one critical error (especially for high\u2011risk regulated content)."
+    },
+    {
+      "name": "automated_qe_score",
+      "unit": "0-1 or 0-100 scale (document and segment level)",
+      "description": "Automatic quality estimation score provided by an external service or model, aggregated per document and per system variant."
+    },
+    {
+      "name": "terminology_violation_rate",
+      "unit": "violations per 1,000 source words",
+      "description": "Count of terminology violations detected automatically by comparing outputs against a termbase, normalized by source length."
+    },
+    {
+      "name": "functional_qa_failure_rate",
+      "unit": "proportion of segments",
+      "description": "Share of segments failing any functional QA check (placeholder/tag preservation, length constraints, format checks), by workload and variant."
+    },
+    {
+      "name": "latency_per_segment",
+      "unit": "milliseconds per segment (or per 100 words)",
+      "description": "End-to-end processing time from sending a segment/document to the translation service(s) until quality scores are computed, for both baseline and treatment pipelines."
+    },
+    {
+      "name": "cost_per_1k_source_words",
+      "unit": "monetary units per 1,000 source words",
+      "description": "Estimated direct API/compute cost (MT/LLM, QE, other services) per 1,000 source words, tracked for each variant."
+    },
+    {
+      "name": "dashboard_coverage_rate",
+      "unit": "proportion of translated items",
+      "description": "Proportion of translated segments/documents that appear in the quality dashboard with all required fields populated (automated metrics, system ID, metadata)."
+    },
+    {
+      "name": "routing_decision_accuracy_post_experiment",
+      "unit": "proportion",
+      "description": "After initial experiment and subsequent routing updates, proportion of future items for which the automatically chosen engine/prompt matches the variant that historically performed best for similar content in terms of human_overall_quality_score. This metric may be populated only in follow-up runs."
+    }
+  ],
+  "success_criteria": {
+    "primary": [
+      {
+        "description": "Human-rated quality improvement in treatment vs. baseline.",
+        "criterion": "On workloads w1-ui_product_strings and w2-marketing_pages, the treatment pipeline yields at least a 10% relative increase in mean human_overall_quality_score compared to baseline (e.g., from 80 to 88 or higher) with statistical significance at p < 0.05 using an appropriate paired or unpaired test, as applicable.",
+        "scope": [
+          "w1-ui_product_strings",
+          "w2-marketing_pages"
+        ]
+      },
+      {
+        "description": "Zero tolerance for critical errors on high-risk content.",
+        "criterion": "For workload w3-high_risk_regulated_docs, the treatment pipeline must not increase critical_error_incidence compared to baseline and should ideally reduce it. At a minimum, both variants must target critical_error_incidence <= 0.05 (\u22645% of documents containing any critical error)."
+      }
+    ],
+    "secondary": [
+      {
+        "description": "Functional correctness parity or improvement.",
+        "criterion": "functional_qa_failure_rate in the treatment pipeline must be less than or equal to that in the baseline pipeline across all workloads, and strictly lower on w1-ui_product_strings."
+      },
+      {
+        "description": "Operational feasibility.",
+        "criterion": "latency_per_segment and cost_per_1k_source_words for the treatment pipeline must not exceed 2x the baseline values for any workload; violations require explicit justification and are considered a trade-off, not an automatic failure."
+      },
+      {
+        "description": "Instrumentation completeness.",
+        "criterion": "dashboard_coverage_rate must be \u2265 0.95 across all workloads for the treatment pipeline and \u2265 0.9 for the baseline (given extended logging). Missing coverage above these levels indicates logging/instrumentation issues that compromise governance goals."
+      }
+    ]
+  },
+  "failure_modes": [
+    {
+      "name": "metric_misalignment_with_human_judgment",
+      "description": "Automated metrics (e.g., automated_qe_score, BLEU) fail to correlate with human_overall_quality_score, leading to incorrect go/no-go decisions or suboptimal engine/prompt choices.",
+      "detection": "Compute correlation (e.g., Pearson/Spearman) between automated_qe_score and human_overall_quality_score; low or negative correlation indicates misalignment. Monitor cases where automated thresholds approve content that human reviewers mark as no-go.",
+      "mitigations": [
+        "Use automated metrics as soft signals rather than hard gating criteria in early deployments.",
+        "Periodically recalibrate QE models or adjust thresholds based on fresh human evaluation data.",
+        "Introduce composite metrics that better capture functional and domain-specific quality aspects."
+      ]
+    },
+    {
+      "name": "reviewer_inconsistency_and_bias",
+      "description": "Human reviewers apply scoring rubrics inconsistently across systems, languages, or workloads, creating noisy labels and unreliable comparisons.",
+      "detection": "Include overlapping content segments for multiple reviewers and compute inter\u2011annotator agreement (e.g., Cohen\u2019s kappa) for key metrics; inspect distribution differences by reviewer.",
+      "mitigations": [
+        "Provide clearer guidelines and examples; run calibration sessions and share gold-standard evaluations.",
+        "Normalize scores per reviewer (e.g., z-score normalization) when aggregating, or use adjudication for disagreements.",
+        "Where feasible, route high\u2011risk decisions through multiple reviewers and apply consensus rules."
+      ]
+    },
+    {
+      "name": "api_or_model_drift_during_experiment",
+      "description": "External MT/LLM or QE providers update models or configurations during the experiment window, affecting comparability between early and late runs.",
+      "detection": "Track model/version IDs and timestamps for each call; inspect for shifts in performance over time within a single variant.",
+      "mitigations": [
+        "Run baseline and treatment in as tight a time window as practical, with interleaved requests.",
+        "If drift is detected, freeze evaluation to a known time window or repeat runs in a shorter, controlled interval.",
+        "Where possible, opt into version-pinned APIs that guarantee model stability for the experiment period."
+      ]
+    },
+    {
+      "name": "data_leakage_between_calibration_and_evaluation",
+      "description": "QE or other scoring models are calibrated on the same content used for experimental evaluation, inflating automated metrics.",
+      "detection": "Track dataset splits explicitly and verify that no content IDs appear in both calibration and evaluation sets.",
+      "mitigations": [
+        "Maintain separate directories and manifest files for calibration vs. evaluation data.",
+        "Automate checks in run scripts that validate dataset disjointness before starting an experiment."
+      ]
+    },
+    {
+      "name": "missing_or_corrupted_logs",
+      "description": "Incomplete logging leads to gaps in the quality dashboard, misrepresented metrics, or inability to trace decisions for audit.",
+      "detection": "Monitor dashboard_coverage_rate; sample raw logs vs. dashboard records to find mismatches; validate logs against a schema on write.",
+      "mitigations": [
+        "Implement strict schema validation and fail-fast behavior on logging errors.",
+        "Buffer logs and ensure reliable delivery to storage (e.g., retry mechanisms).",
+        "Include periodic data-quality checks that alert when coverage drops below defined thresholds."
+      ]
+    },
+    {
+      "name": "overly_strict_thresholds_blocking_release",
+      "description": "Quality thresholds configured too aggressively for low- or medium-risk content cause unnecessary no-go decisions, reducing throughput.",
+      "detection": "Monitor human_go_no_go_rate and compare to historical release patterns; high no-go rates on low-risk content may signal misconfigured thresholds.",
+      "mitigations": [
+        "Adopt risk-based thresholds that differ by content type and risk level.",
+        "Start with more permissive thresholds and tighten them gradually as confidence in metrics grows.",
+        "Introduce an override mechanism with audit logging for justified exceptions."
+      ]
+    }
+  ],
+  "required_environment": {
+    "runtime": {
+      "language": "Python",
+      "version": ">=3.10",
+      "package_manager": "pip or Poetry",
+      "os": [
+        "Linux (preferred, e.g., Ubuntu 22.04)",
+        "macOS 12+"
+      ]
+    },
+    "python_dependencies": [
+      "pandas>=2.0",
+      "numpy>=1.25",
+      "scikit-learn>=1.3",
+      "sacrebleu>=2.4  (or equivalent BLEU/ChrF library)",
+      "requests>=2.31",
+      "pydantic>=2.0 (for schema validation)",
+      "pyyaml>=6.0",
+      "plotly>=5.0 or matplotlib/seaborn (for dashboard/plots)",
+      "fastapi>=0.110 or streamlit/dash (optional, if implementing a live dashboard UI)",
+      "tenacity>=8.0 (for retry logic)"
+    ],
+    "services": {
+      "mt_llm_providers": "At least one MT or LLM provider accessible via API (e.g., Azure, Google, open-source model served via a local endpoint). Configuration must be supplied via environment variables or config files; the repository will not hard-code provider secrets.",
+      "qe_provider": "Optional external QE API or a local QE model; if unavailable, stub QE scores with simple heuristic metrics and mark them clearly as such.",
+      "storage": "Local filesystem-based storage is sufficient for experimental data (logs, outputs, dashboards). A relational DB or data warehouse is optional for larger scale."
+    },
+    "configuration": {
+      "env_vars": [
+        "MT_API_KEY (or provider-specific equivalents)",
+        "QE_API_KEY (if using external QE)",
+        "EXPERIMENT_ENV (e.g., dev, ci, prod-sandbox)"
+      ],
+      "config_files": [
+        "experiments/ch06/common/config/logging.yaml",
+        "experiments/ch06/common/config/metrics.yaml"
+      ]
+    },
+    "reproducibility": {
+      "containerization": "Optional Docker image defined in docker/Dockerfile.ch06 with pinned dependencies for fully reproducible runs.",
+      "random_seed": 42,
+      "time_control": "Where time-based fields are logged, store timestamps in UTC with ISO 8601 format."
+    }
+  },
+  "run_instructions": {
+    "high_level_steps": [
+      "Clone the repository and set up the Python environment.",
+      "Download or verify presence of workload datasets for Chapter 6.",
+      "Configure MT/LLM and QE providers via config files and environment variables.",
+      "Run the baseline pipeline on all workloads and log results.",
+      "Run the treatment pipeline on all workloads and log results.",
+      "Conduct structured human evaluation on designated content subsets.",
+      "Aggregate metrics and generate comparative reports and dashboards.",
+      "Review results against success_criteria and document findings."
+    ],
+    "detailed_steps": [
+      {
+        "step": 1,
+        "title": "Clone repository and create environment",
+        "commands": [
+          "git clone https://github.com/bookauthority/ai-localization-quality-culture-compliance.git",
+          "cd ai-localization-quality-culture-compliance",
+          "python -m venv .venv",
+          "source .venv/bin/activate  # or .venv\\Scripts\\activate on Windows",
+          "pip install -r experiments/ch06/requirements.txt"
+        ]
+      },
+      {
+        "step": 2,
+        "title": "Prepare datasets",
+        "description": "Ensure that the datasets for w1, w2, and w3 workloads are present and validated.",
+        "commands": [
+          "ls data/ch06/workloads/ui_strings",
+          "ls data/ch06/workloads/marketing_pages",
+          "ls data/ch06/workloads/high_risk_regulated",
+          "python experiments/ch06/common/validate_datasets.py --config experiments/ch06/common/config/datasets.yaml"
+        ]
+      },
+      {
+        "step": 3,
+        "title": "Configure providers and quality thresholds",
+        "description": "Set API keys and edit config files for engines, prompts, and quality thresholds as applicable to your environment.",
+        "commands": [
+          "export MT_API_KEY=your_key_here",
+          "export QE_API_KEY=your_qe_key_here  # optional",
+          "cp experiments/ch06/treatment/config/engines_and_prompts.example.yaml experiments/ch06/treatment/config/engines_and_prompts.yaml",
+          "cp experiments/ch06/treatment/config/quality_thresholds.example.yaml experiments/ch06/treatment/config/quality_thresholds.yaml",
+          "nano experiments/ch06/treatment/config/engines_and_prompts.yaml  # or use your editor"
+        ]
+      },
+      {
+        "step": 4,
+        "title": "Run baseline pipeline",
+        "description": "Execute the baseline localization pipeline across all workloads with randomization seed fixed.",
+        "commands": [
+          "python experiments/ch06/baseline/run_pipeline.py \\",
+          "  --config experiments/ch06/baseline/config/pipeline.baseline.yaml \\",
+          "  --workloads w1-ui_product_strings w2-marketing_pages w3-high_risk_regulated_docs \\",
+          "  --seed 42 \\",
+          "  --output_dir outputs/ch06/baseline"
+        ]
+      },
+      {
+        "step": 5,
+        "title": "Run treatment pipeline",
+        "description": "Execute the enhanced quality-aware pipeline with automated metrics and routing instrumentation.",
+        "commands": [
+          "python experiments/ch06/treatment/run_pipeline.py \\",
+          "  --config experiments/ch06/treatment/config/pipeline.treatment.yaml \\",
+          "  --workloads w1-ui_product_strings w2-marketing_pages w3-high_risk_regulated_docs \\",
+          "  --seed 42 \\",
+          "  --output_dir outputs/ch06/treatment"
+        ]
+      },
+      {
+        "step": 6,
+        "title": "Conduct human evaluation",
+        "description": "Export designated subsets for human review, collect scores, and re-ingest them into the metrics pipeline.",
+        "commands": [
+          "python experiments/ch06/common/export_for_human_eval.py \\",
+          "  --baseline_dir outputs/ch06/baseline \\",
+          "  --treatment_dir outputs/ch06/treatment \\",
+          "  --workload w1-ui_product_strings --sample_ratio 0.2 \\",
+          "  --out_dir human_eval/ch06/w1",
+          "python experiments/ch06/common/export_for_human_eval.py \\",
+          "  --baseline_dir outputs/ch06/baseline \\",
+          "  --treatment_dir outputs/ch06/treatment \\",
+          "  --workload w2-marketing_pages --sample_ratio 0.3 \\",
+          "  --out_dir human_eval/ch06/w2",
+          "python experiments/ch06/common/export_for_human_eval.py \\",
+          "  --baseline_dir outputs/ch06/baseline \\",
+          "  --treatment_dir outputs/ch06/treatment \\",
+          "  --workload w3-high_risk_regulated_docs --sample_ratio 0.5 \\",
+          "  --out_dir human_eval/ch06/w3",
+          "# After reviewers fill in the provided templates:",
+          "python experiments/ch06/common/ingest_human_eval.py \\",
+          "  --input_dir human_eval/ch06 \\",
+          "  --output_dir outputs/ch06/human_eval_aggregated"
+        ]
+      },
+      {
+        "step": 7,
+        "title": "Aggregate metrics and build dashboard",
+        "description": "Compute experimental metrics, statistical comparisons, and visualization artifacts.",
+        "commands": [
+          "python experiments/ch06/analysis/compute_metrics.py \\",
+          "  --baseline_dir outputs/ch06/baseline \\",
+          "  --treatment_dir outputs/ch06/treatment \\",
+          "  --human_eval_dir outputs/ch06/human_eval_aggregated \\",
+          "  --out_dir outputs/ch06/metrics",
+          "python experiments/ch06/analysis/build_dashboard.py \\",
+          "  --metrics_dir outputs/ch06/metrics \\",
+          "  --out_dir outputs/ch06/dashboard"
+        ]
+      },
+      {
+        "step": 8,
+        "title": "Review results vs. success criteria",
+        "description": "Open the generated reports/notebooks and compare outcomes to the predefined success_criteria. Document interpretations and governance implications.",
+        "commands": [
+          "jupyter notebook experiments/ch06/analysis/notebooks/ch06_quality_experiment_report.ipynb",
+          "# Or open the static HTML/PDF report in outputs/ch06/metrics/"
+        ]
+      }
+    ],
+    "notes": [
+      "Do not modify dataset contents or random seed if you intend to compare your results with published benchmarks from the book.",
+      "If you cannot access an external QE provider, configure metrics.yaml to disable QE and rely on lexical metrics and human scores; clearly mark these runs as QE-disabled.",
+      "All scripts are intended to be idempotent; re-running with the same inputs and seed should produce identical metric outputs, aside from time stamps."
+    ]
+  },
+  "evidence_schema": {
+    "description": "Structured schema for recording experimental evidence, including per-item logs and aggregated metrics, to support quality dashboards, audits, and governance decisions.",
+    "segment_log": {
+      "type": "object",
+      "required_fields": [
+        "experiment_id",
+        "workload_id",
+        "item_id",
+        "segment_id",
+        "source_text",
+        "target_text",
+        "language_pair",
+        "content_type",
+        "risk_level",
+        "system_variant",
+        "engine_id",
+        "prompt_id",
+        "automated_metrics",
+        "functional_checks",
+        "timestamps"
+      ],
+      "properties": {
+        "experiment_id": {
+          "type": "string",
+          "example": "ch06-operationalizing-quality-metrics-eval-feedback-v1"
+        },
+        "workload_id": {
+          "type": "string",
+          "example": "w1-ui_product_strings"
+        },
+        "item_id": {
+          "type": "string",
+          "description": "Identifier of the source asset/document this segment belongs to."
+        },
+        "segment_id": {
+          "type": "string",
+          "description": "Unique identifier of the segment within the item."
+        },
+        "source_text": {
+          "type": "string"
+        },
+        "target_text": {
+          "type": "string"
+        },
+        "language_pair": {
+          "type": "string",
+          "example": "en->fr"
+        },
+        "content_type": {
+          "type": "string",
+          "enum": [
+            "ui_string",
+            "marketing",
+            "regulated_high_risk"
+          ]
+        },
+        "risk_level": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "system_variant": {
+          "type": "string",
+          "enum": [
+            "baseline",
+            "treatment"
+          ]
+        },
+        "engine_id": {
+          "type": "string",
+          "description": "Identifier of the MT/LLM engine used (e.g., Engine_A, Engine_B, provider model name)."
+        },
+        "prompt_id": {
+          "type": "string",
+          "description": "Identifier of the prompt or configuration used (e.g., Prompt_A_baseline, Prompt_B_quality_tuned)."
+        },
+        "automated_metrics": {
+          "type": "object",
+          "properties": {
+            "qe_score": {
+              "type": "number",
+              "nullable": true
+            },
+            "bleu": {
+              "type": "number",
+              "nullable": true
+            },
+            "chrf": {
+              "type": "number",
+              "nullable": true
+            },
+            "ter": {
+              "type": "number",
+              "nullable": true
+            },
+            "terminology_violations": {
+              "type": "integer"
+            }
+          }
+        },
+        "functional_checks": {
+          "type": "object",
+          "properties": {
+            "placeholder_mismatch": {
+              "type": "boolean"
+            },
+            "tag_mismatch": {
+              "type": "boolean"
+            },
+            "length_constraint_violated": {
+              "type": "boolean"
+            },
+            "locale_format_issue": {
+              "type": "boolean"
+            }
+          }
+        },
+        "timestamps": {
+          "type": "object",
+          "properties": {
+            "request_time_utc": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "response_time_utc": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        },
+        "cost": {
+          "type": "object",
+          "properties": {
+            "mt_cost": {
+              "type": "number",
+              "description": "Estimated monetary cost for MT/LLM API call."
+            },
+            "qe_cost": {
+              "type": "number",
+              "description": "Estimated monetary cost for QE call, if applicable."
+            }
+          }
+        }
+      }
+    },
+    "human_evaluation_record": {
+      "type": "object",
+      "required_fields": [
+        "experiment_id",
+        "workload_id",
+        "item_id",
+        "segment_id",
+        "system_variant",
+        "reviewer_id",
+        "scores",
+        "errors"
+      ],
+      "properties": {
+        "experiment_id": {
+          "type": "string"
+        },
+        "workload_id": {
+          "type": "string"
+        },
+        "item_id": {
+          "type": "string"
+        },
+        "segment_id": {
+          "type": "string",
+          "nullable": true,
+          "description": "If null, the record applies at document level only."
+        },
+        "system_variant": {
+          "type": "string",
+          "enum": [
+            "baseline",
+            "treatment"
+          ]
+        },
+        "reviewer_id": {
+          "type": "string",
+          "description": "Pseudonymous identifier for the reviewer."
+        },
+        "scores": {
+          "type": "object",
+          "properties": {
+            "accuracy": {
+              "type": "number",
+              "description": "Segment-level or document-level score (0\u20135 or mapped to 0\u2013100)."
+            },
+            "fluency": {
+              "type": "number"
+            },
+            "terminology": {
+              "type": "number"
+            },
+            "style_tone": {
+              "type": "number"
+            },
+            "functional_correctness": {
+              "type": "number"
+            },
+            "compliance_cultural": {
+              "type": "number"
+            },
+            "overall": {
+              "type": "number",
+              "description": "Overall quality score normalized to 0\u2013100 at the document level."
+            },
+            "go_no_go": {
+              "type": "string",
+              "enum": [
+                "go",
+                "no-go"
+              ]
+            }
+          }
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "category": {
+                "type": "string",
+                "enum": [
+                  "Accuracy",
+                  "Fluency",
+                  "Terminology",
+                  "Style",
+                  "Locale",
+                  "Formatting",
+                  "Other"
+                ]
+              },
+              "severity": {
+                "type": "string",
+                "enum": [
+                  "Minor",
+                  "Major",
+                  "Critical"
+                ]
+              },
+              "span_reference": {
+                "type": "string",
+                "description": "Optional reference to text span or offset where the error occurs."
+              },
+              "comment": {
+                "type": "string",
+                "description": "Optional free-text explanation from the reviewer."
+              }
+            }
+          }
+        }
+      }
+    },
+    "aggregated_metrics_record": {
+      "type": "object",
+      "required_fields": [
+        "experiment_id",
+        "workload_id",
+        "system_variant",
+        "language_pair",
+        "content_type",
+        "risk_level",
+        "n_items",
+        "metrics"
+      ],
+      "properties": {
+        "experiment_id": {
+          "type": "string"
+        },
+        "workload_id": {
+          "type": "string"
+        },
+        "system_variant": {
+          "type": "string",
+          "enum": [
+            "baseline",
+            "treatment"
+          ]
+        },
+        "language_pair": {
+          "type": "string"
+        },
+        "content_type": {
+          "type": "string"
+        },
+        "risk_level": {
+          "type": "string"
+        },
+        "n_items": {
+          "type": "integer",
+          "description": "Number of documents/items included in the aggregation."
+        },
+        "metrics": {
+          "type": "object",
+          "properties": {
+            "human_overall_quality_score_mean": {
+              "type": "number"
+            },
+            "human_overall_quality_score_ci95": {
+              "type": "number",
+              "description": "Half-width of the 95% confidence interval."
+            },
+            "human_go_no_go_rate": {
+              "type": "number"
+            },
+            "mqm_like_error_rate_minor": {
+              "type": "number"
+            },
+            "mqm_like_error_rate_major": {
+              "type": "number"
+            },
+            "mqm_like_error_rate_critical": {
+              "type": "number"
+            },
+            "critical_error_incidence": {
+              "type": "number"
+            },
+            "automated_qe_score_mean": {
+              "type": "number"
+            },
+            "terminology_violation_rate": {
+              "type": "number"
+            },
+            "functional_qa_failure_rate": {
+              "type": "number"
+            },
+            "latency_per_segment_mean_ms": {
+              "type": "number"
+            },
+            "cost_per_1k_source_words": {
+              "type": "number"
+            }
+          }
+        },
+        "statistical_tests": {
+          "type": "object",
+          "description": "Optional pairwise comparison metrics when aggregating multiple variants (e.g., baseline vs. treatment).",
+          "properties": {
+            "comparison_target": {
+              "type": "string",
+              "enum": [
+                "baseline",
+                "treatment"
+              ]
+            },
+            "p_value_human_overall_quality_score": {
+              "type": "number"
+            },
+            "effect_size_human_overall_quality_score": {
+              "type": "number",
+              "description": "Standardized effect size (e.g., Cohen\u2019s d)."
+            }
+          }
+        },
+        "timestamp_aggregated_utc": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,9 @@
+id,source_text,source_locale,content_type,metadata
+mkt_001,"Experience the power of {product_name} today!",en-US,marketing,
+mkt_002,"Upgrade now and save 20% on your first year.",en-US,marketing,
+mkt_003,"Welcome to **Pro Plan**.",en-US,product_ui,
+mkt_004,"New features \\nfor modern teams.",en-US,marketing,
+mkt_005,"Start your free trial in minutes.",en-US,marketing,
+mkt_006,"Manage accounts, billing, and more from one place.",en-US,marketing,
+mkt_007,"Your dashboard is ready, {user_name}.",en-US,product_ui,
+mkt_008,"Trusted by leading enterprises worldwide.",en-US,marketing,

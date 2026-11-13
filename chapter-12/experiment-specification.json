@@ -1,0 +1,756 @@
+{
+  "experiment_id": "ch12-vendor-bakeoff-hybrid-sourcing-001",
+  "hypothesis": "For a regulated enterprise localization workload, a systematically evaluated hybrid sourcing model (multi-vendor plus in-house routing) will (a) achieve equal or better translation quality and compliance risk scores than the incumbent single-vendor setup, while (b) reducing total cost per word by at least 10% and (c) maintaining latency within agreed SLOs, when vendors are compared under identical workloads, constraints, and evaluation protocols.",
+  "baseline": {
+    "description": "Current or simplest viable sourcing setup used as a reference point. This is typically a single primary localization vendor or MT provider integrated via a TMS, without dynamic routing or multi-vendor optimization.",
+    "sourcing_model": "Single-vendor or single-MT-engine model serving all automated localization requests for the selected workloads.",
+    "integration_pattern": "Direct integration from the orchestration layer (or TMS) to one external vendor API endpoint (e.g., a single MT provider or single LSP gateway).",
+    "workload_routing_logic": "All eligible content of the tested workload types is routed to the baseline vendor. Human review and compliance checks (if any) follow existing organizational practice and are recorded but not altered for the experiment.",
+    "contracts_and_policies": {
+      "data_use": "Existing contract terms; no experimental access to new data categories. Only content types already approved for external processing are included.",
+      "ip_and_ownership": "Existing IP terms remain in force. No new IP assignments are introduced as part of the experiment.",
+      "audit_and_logging": "Use existing logging from TMS/CI/CD where possible; augment with experiment-specific logs in the evaluation harness without changing vendor obligations."
+    },
+    "evaluation_mode": "The baseline is re-run or replayed on the selected experimental workloads, using the same source segments that will be sent to treatment vendors, to enable side-by-side comparison.",
+    "label": "baseline_single_vendor"
+  },
+  "treatment": {
+    "description": "A hybrid sourcing model in which multiple external vendors and/or MT/LLM engines are evaluated under a common bake-off harness, and the best-performing configuration is identified. The treatment under test is the *selection mechanism and hybrid configuration*, not only the vendors themselves.",
+    "sourcing_model": "Multi-vendor, hybrid setup combining at least: (a) two or more MT/LLM providers, (b) optionally one or more LSPs via TMS or API, and (c) an in-house or private model option where available.",
+    "integration_pattern": "A vendor-agnostic adapter layer in the experiment harness that normalizes requests/responses across vendors (e.g., common JSON contract with fields for source_text, source_lang, target_lang, domain, risk_tier, metadata). Each vendor is implemented as a plugin/driver conforming to this interface.",
+    "workload_routing_logic": "During the bake-off phase, the same input segments are sent independently to each participating vendor/engine for offline comparison (no end-user exposure). In a second phase (optional, subject to governance), a learned or rule-based routing policy is evaluated that sends live traffic to a selected subset of vendors based on observed performance (e.g., by language pair and domain).",
+    "contractual_guards": {
+      "data_use": "All vendors must support contractual restrictions equivalent to or stricter than the baseline: no training on submitted data, no onward sharing, data residency consistent with regulatory constraints, and explicit deletion/retention windows.",
+      "ip_and_ownership": "Client retains ownership of localized outputs; vendors grant sufficient licenses for evaluation usage, including storing outputs in the experiment repository and internal analytics tools.",
+      "audit_and_logging": "Vendors agree to allow storage of request/response metadata (excluding any redacted PII) in experiment logs, with explicit rights for internal audit, model comparison, and regulatory evidence."
+    },
+    "evaluation_mode": "All candidate vendors are evaluated on identical workloads with the same inputs and reference translations, under identical rate limits and concurrency settings, using the same quality/compliance evaluation stack. No vendor-specific post-editing is applied before scoring.",
+    "label": "treatment_hybrid_sourcing"
+  },
+  "workloads": [
+    {
+      "name": "pharma_patient_info_high_risk",
+      "description": "High-risk, patient-facing pharmaceutical information leaflets and safety communications that require strict fidelity to source, terminology adherence, and regulatory alignment.",
+      "content_sources": [
+        "Synthetic or anonymized extracts of patient information leaflets",
+        "Safety update announcements",
+        "Medication usage instructions"
+      ],
+      "languages": [
+        "en->de",
+        "en->fr",
+        "en->es",
+        "en->ja"
+      ],
+      "risk_tier": "high",
+      "volume": {
+        "segments": 2000,
+        "approx_words": 40000
+      },
+      "constraints": {
+        "terminology": "Strict terminology adherence; critical terms are provided via termbase and must be enforced by all vendors.",
+        "style": "Conservative medical tone; no creative paraphrasing that could change clinical meaning.",
+        "compliance": "Absolute prohibition on hallucinated clinical claims or dosage variations."
+      }
+    },
+    {
+      "name": "finance_marketing_and_disclosures_medium_risk",
+      "description": "Mixture of regulated financial disclosures and adjacent marketing content where both legal accuracy and tone are important.",
+      "content_sources": [
+        "Key investor information documents (KIIDs) or equivalent regulated disclosures (appropriately anonymized)",
+        "Retail financial product descriptions",
+        "Top-of-funnel marketing blurbs for financial products"
+      ],
+      "languages": [
+        "en->es",
+        "en->pt-BR",
+        "en->fr",
+        "en->zh-CN"
+      ],
+      "risk_tier": "medium",
+      "volume": {
+        "segments": 2000,
+        "approx_words": 35000
+      },
+      "constraints": {
+        "terminology": "Moderate-to-strict: brand and regulatory terms must be consistent with provided glossary.",
+        "style": "Trust-building, precise, with regional variants respected (e.g., pt-BR vs pt-PT).",
+        "compliance": "No misleading performance promises; disclaimers must be faithfully preserved."
+      }
+    },
+    {
+      "name": "b2b_saas_ui_and_help_low_to_medium_risk",
+      "description": "Software UI strings, in-product notifications, and online help center content for a B2B SaaS product.",
+      "content_sources": [
+        "Resource files (e.g., .json/.po/.resx) containing UI strings",
+        "Inline tooltips and notifications",
+        "Help center articles with screenshots and step-by-step instructions (text only for this experiment)"
+      ],
+      "languages": [
+        "en->de",
+        "en->fr",
+        "en->ja",
+        "en->ko"
+      ],
+      "risk_tier": "low_to_medium",
+      "volume": {
+        "segments": 3000,
+        "approx_words": 30000
+      },
+      "constraints": {
+        "terminology": "UI terms and product-specific entities must be kept consistent; placeholders and tags must be preserved.",
+        "style": "Concise, instructional, aligned with in-product style guide.",
+        "compliance": "Basic brand and UX compliance; no strong regulatory overlay but must avoid offensive or culturally inappropriate phrasing."
+      }
+    }
+  ],
+  "controls": {
+    "data_controls": {
+      "shared_source_dataset": "All vendors receive identical, pre-frozen source segments for each workload, with deterministic ordering and stable identifiers.",
+      "shared_reference_translations": "A single set of high-quality human reference translations is used for metric-based evaluation. These are version-controlled in the repository under /data/references/.",
+      "train_test_leakage": "Ensure that no vendor is given reference translations or prior post-edited outputs of the exact same segments before the bake-off. When using vendors that may have been previously exposed, tag such segments and optionally analyze separately."
+    },
+    "prompt_and_parameter_controls": {
+      "mt_apis": "Use default or recommended 'general' domain models unless a vendor has explicit healthcare/finance/legal models that comply with risk posture; in that case, document the model IDs and use equivalent domain-specific offerings across vendors when available.",
+      "llm_apis": "Use a shared, vendor-neutral prompt template for translation tasks with structured instructions for terminology, style, and risk constraints. Parameters like temperature, top_p, and max_tokens are fixed across LLM vendors where applicable.",
+      "terminology": "Inject the same termbase per workload into each vendor to the extent supported (via glossary features or in-context instructions). When a vendor lacks explicit glossary support, encode terms in prompts or pre-/post-processing logic and document the workaround."
+    },
+    "traffic_and_latency_controls": {
+      "concurrency": "Set a fixed maximum number of concurrent requests per vendor during latency and throughput measurements to avoid unfair advantages or throttling penalties. Record actual concurrency and queue times.",
+      "batching": "If vendor APIs support batch translation, use functionally equivalent batch sizes across vendors. Where batching is not supported, simulate batch size=1 and note this in analysis.",
+      "network_conditions": "Run all calls from the same cloud region and VPC/environment to minimize network-induced variance. Optionally, repeat measurements at two time windows to detect diurnal effects."
+    },
+    "governance_controls": {
+      "blind_human_evaluation": "Human reviewers are not told which vendor produced which output. Outputs are randomized and anonymized by vendor ID.",
+      "consistent_guidelines": "All human evaluators use the same evaluation rubrics and instructions, version-controlled and piloted before the main study.",
+      "ethical_guardrails": "Content that could contain PII or sensitive patient/financial data is de-identified or synthetically generated. Do not use real patient-identifiable or client-identifiable data without explicit approvals."
+    },
+    "randomization": {
+      "segment_order": "Randomize evaluation order within each workload and vendor to avoid position effects.",
+      "vendor_labeling": "Assign stable but anonymous vendor codes (e.g., V1, V2, V3, Baseline) for the duration of the experiment."
+    }
+  },
+  "metrics": [
+    {
+      "name": "auto_quality_bleu",
+      "description": "Segment- and system-level BLEU score compared against human reference translations per language pair and workload.",
+      "unit": "BLEU_points"
+    },
+    {
+      "name": "auto_quality_comet",
+      "description": "Model-based translation quality score (e.g., COMET or COMETKiwi) aggregated per vendor, workload, and language pair.",
+      "unit": "COMET_score"
+    },
+    {
+      "name": "human_quality_score",
+      "description": "Human evaluation of linguistic adequacy and fluency on a 1\u20135 or 0\u2013100 scale, averaged across reviewers and segments.",
+      "unit": "score_points"
+    },
+    {
+      "name": "critical_error_rate",
+      "description": "Rate of critical errors per 1,000 words (e.g., mistranslated dosage, financial amount, legal clause) classified using a standardized MQM-like rubric.",
+      "unit": "critical_errors_per_1000_words"
+    },
+    {
+      "name": "terminology_accuracy",
+      "description": "Percentage of required glossary terms correctly used where applicable, with incorrect or missing term usage counted as errors.",
+      "unit": "percent_correct_terms"
+    },
+    {
+      "name": "compliance_violation_rate",
+      "description": "Number of detected regulatory or policy violations per 1,000 words based on a rule-based and/or ML compliance checker tailored to each domain.",
+      "unit": "violations_per_1000_words"
+    },
+    {
+      "name": "latency_p50",
+      "description": "Median end-to-end API latency per segment or batch, measured from request dispatch to response receipt.",
+      "unit": "milliseconds"
+    },
+    {
+      "name": "latency_p95",
+      "description": "95th percentile end-to-end API latency per segment or batch.",
+      "unit": "milliseconds"
+    },
+    {
+      "name": "throughput",
+      "description": "Number of words translated per minute per vendor under the controlled concurrency settings.",
+      "unit": "words_per_minute"
+    },
+    {
+      "name": "cost_per_1000_words",
+      "description": "Total variable vendor fees divided by total words processed, normalized to cost per 1,000 words (excluding internal labor).",
+      "unit": "currency_per_1000_words"
+    },
+    {
+      "name": "post_editing_effort",
+      "description": "Optional: Approximate human post-editing effort, measured via time tracking or edit distance between vendor output and final post-edited version, aggregated per vendor.",
+      "unit": "seconds_per_1000_words_or_edit_distance_points"
+    }
+  ],
+  "success_criteria": {
+    "primary": [
+      {
+        "description": "Quality and compliance non-regression against baseline for high-risk workloads.",
+        "rule": "For each high-risk workload and language pair, the selected hybrid sourcing configuration must achieve: (a) auto_quality_comet >= baseline_comet - 0.1 and human_quality_score >= baseline_human_score - 0.1 standard deviations, and (b) critical_error_rate and compliance_violation_rate not statistically higher than baseline at a 95% confidence level."
+      },
+      {
+        "description": "Cost reduction across the combined portfolio.",
+        "rule": "Across all workloads and languages combined, the volume-weighted average cost_per_1000_words of the selected hybrid configuration must be at least 10% lower than the baseline_single_vendor cost_per_1000_words."
+      },
+      {
+        "description": "Latency within acceptable SLOs for low-to-medium risk workloads.",
+        "rule": "For medium- and low-risk workloads, latency_p95 for the hybrid configuration must not exceed the baseline latency_p95 by more than 25%, and the absolute latency_p95 must remain below a pre-agreed SLO (e.g., 2000 ms)."
+      }
+    ],
+    "secondary": [
+      {
+        "description": "Terminology adherence improvement or non-regression.",
+        "rule": "terminology_accuracy for the hybrid configuration should be >= baseline terminology_accuracy for at least 80% of evaluated language pairs per workload."
+      },
+      {
+        "description": "Improved resilience and vendor diversification.",
+        "rule": "Simulation of a primary-vendor outage using the experiment harness (disabling one top-performing vendor) shows that at least one backup vendor in the hybrid set can maintain quality and latency within 15% of the full configuration on at least the medium- and low-risk workloads."
+      }
+    ],
+    "decision_framework": {
+      "go_decision": "Adopt hybrid sourcing when primary success criteria are met and no unmitigated failure modes (see failure_modes) are observed that would increase regulatory or brand risk beyond predefined thresholds.",
+      "no_go_or_revise_decision": "If any primary criterion fails, or critical failure modes are observed, do not switch to the hybrid sourcing model without revising vendor set, contracts, or routing policies and re-running the experiment."
+    }
+  },
+  "failure_modes": [
+    {
+      "name": "hidden_compliance_risks",
+      "description": "Vendors that score well on general quality metrics but systematically fail compliance checks in subtle ways (e.g., softening risk statements, altering legal disclaimers).",
+      "detection": "Discrepancy between auto_quality_comet/human_quality_score and compliance_violation_rate, especially on high-risk workloads."
+    },
+    {
+      "name": "terminology_breakage",
+      "description": "Vendors that deliver high fluency but poor glossary adherence, especially in regulated terms.",
+      "detection": "Low terminology_accuracy (e.g., <90% on high-risk workloads) along with higher-than-baseline critical_error_rate tied to terminology-related mistakes."
+    },
+    {
+      "name": "vendor_throttling_and_unstable_latency",
+      "description": "Rate-limiting or variable performance under realistic concurrency that makes a vendor unsuitable for production peaks.",
+      "detection": "High variance and spikes in latency_p95 and throughput under controlled load tests, inconsistent with vendor claims."
+    },
+    {
+      "name": "data_residency_or_privacy_mismatch",
+      "description": "Vendor infrastructure or operational practices conflict with data residency or privacy constraints discovered during or after the bake-off.",
+      "detection": "Contract/legal review flags; cross-checking actual endpoint regions, sub-processors, and audit artifacts against policy requirements."
+    },
+    {
+      "name": "evaluation_bias_towards_one_vendor_type",
+      "description": "Experiment design or metrics inadvertently favor one vendor class (e.g., generic MT vs. human-in-the-loop LSP) and misrepresent true business value.",
+      "detection": "Systematic performance differences that disappear or reverse when using different metrics (e.g., task-based evaluations, post-edit effort) or when stratifying by content type."
+    },
+    {
+      "name": "lock_in_through_integration_specifics",
+      "description": "Treatment integration relies heavily on one vendor\u2019s proprietary features such that switching becomes costly, undermining portability goals.",
+      "detection": "Adapter layer includes vendor-specific logic that is hard to generalize; high proportion of code branching per vendor; routing logic or term enforcement only available for one provider."
+    },
+    {
+      "name": "governance_overload",
+      "description": "Multi-vendor setup increases operational complexity beyond what the current team and governance structures can safely manage.",
+      "detection": "Runbooks, incident response, and monitoring become materially more complex; higher operational incident rate in pilot; stakeholder feedback indicates unverifiable complexity."
+    }
+  ],
+  "required_environment": {
+    "runtime": {
+      "language": "Python 3.10+",
+      "tooling": [
+        "poetry or pip + virtualenv for dependency management",
+        "Docker for containerized runs",
+        "GNU Make or simple CLI scripts for orchestration of experiment runs"
+      ]
+    },
+    "libraries": {
+      "http_and_async": [
+        "httpx or requests",
+        "asyncio and/or trio (if using async concurrency)"
+      ],
+      "nlp_and_metrics": [
+        "sacrebleu for BLEU",
+        "unbabel-comet or equivalent for COMET metrics",
+        "sacremoses or similar for tokenization (if needed)"
+      ],
+      "data_handling": [
+        "pandas",
+        "pyarrow (optional, for columnar storage)",
+        "python-dotenv for secrets management"
+      ],
+      "evaluation_and_stats": [
+        "numpy",
+        "scipy (for significance testing)",
+        "scikit-learn (optional for additional analysis)"
+      ]
+    },
+    "services_and_credentials": {
+      "vendor_apis": "API keys and/or OAuth credentials for each participating MT/LLM provider and TMS/LSP gateway, stored securely (e.g., in environment variables or secrets manager, never committed to the repository).",
+      "logging_and_storage": "Access to an object store or database (e.g., S3, GCS, Azure Blob, or Postgres) for storing raw responses, logs, and evaluation results. For minimal setup, local filesystem with structured directories is acceptable.",
+      "compliance_checker": "Access to rule-based or ML compliance checking tools used in Chapter 9 (may be internal services or open-source rule engines configured for the experiment domains)."
+    },
+    "infrastructure": {
+      "compute": "A single cloud VM or workstation with at least 4 vCPUs, 8\u201316 GB RAM is typically sufficient. For larger workloads or heavy COMET scoring, scale accordingly.",
+      "network": "Stable outbound HTTPS connectivity to all vendor endpoints from a controlled region that matches data residency and privacy policies.",
+      "containerization": "Docker image defined in the repository (e.g., /docker/Dockerfile.experiment) that pins library versions and OS-level dependencies."
+    },
+    "repository_layout": {
+      "root": "https://github.com/bookauthority/ai-localization-quality-culture-compliance",
+      "structure": {
+        "data": {
+          "sources": "/data/ch12_vendor_eval/sources/",
+          "references": "/data/ch12_vendor_eval/references/",
+          "termbases": "/data/ch12_vendor_eval/termbases/",
+          "config": "/data/ch12_vendor_eval/config/"
+        },
+        "code": {
+          "experiment_scripts": "/experiments/ch12_vendor_eval/",
+          "vendor_adapters": "/experiments/ch12_vendor_eval/vendors/",
+          "evaluation": "/experiments/ch12_vendor_eval/eval/"
+        },
+        "artifacts": {
+          "raw_outputs": "/artifacts/ch12_vendor_eval/raw/",
+          "metrics": "/artifacts/ch12_vendor_eval/metrics/",
+          "reports": "/artifacts/ch12_vendor_eval/reports/"
+        }
+      }
+    }
+  },
+  "run_instructions": [
+    "1. Clone the repository and set up environment.",
+    "   - git clone https://github.com/bookauthority/ai-localization-quality-culture-compliance.git",
+    "   - cd ai-localization-quality-culture-compliance",
+    "   - (Recommended) cp .env.example .env and populate vendor API keys and configuration variables.",
+    "   - Create and activate a Python virtual environment and install dependencies (e.g., `poetry install` or `pip install -r requirements-ch12.txt`).",
+    "",
+    "2. Build or pull the experiment Docker image (optional but recommended for reproducibility).",
+    "   - docker build -f docker/Dockerfile.ch12 -t ai-loc-ch12-vendor-eval .",
+    "   - Alternatively, use a pre-built image as documented in the repo README.",
+    "",
+    "3. Prepare input datasets.",
+    "   - Ensure that the source segments for each workload (pharma_patient_info_high_risk, finance_marketing_and_disclosures_medium_risk, b2b_saas_ui_and_help_low_to_medium_risk) are present under /data/ch12_vendor_eval/sources/ with filenames like:",
+    "       - pharma_high_risk.en.jsonl",
+    "       - finance_medium_risk.en.jsonl",
+    "       - saas_ui_low_medium_risk.en.jsonl",
+    "   - Ensure that corresponding reference translations (human-produced) are stored under /data/ch12_vendor_eval/references/ in language-specific files (e.g., pharma_high_risk.en-de.ref.jsonl).",
+    "   - Place termbases/glossaries for each workload under /data/ch12_vendor_eval/termbases/ (e.g., pharma_termbase.tsv, finance_termbase.tsv, saas_ui_termbase.tsv).",
+    "",
+    "4. Configure vendors and experiment parameters.",
+    "   - Edit /data/ch12_vendor_eval/config/vendors.yaml to define each vendor adapter, including:",
+    "       - vendor_id (e.g., baseline_single_vendor, vendor_mt_a, vendor_llm_b, lsp_gateway_c)",
+    "       - api_base_url, model_id or engine_name, supported languages, domain configuration",
+    "       - rate limits (max_requests_per_second, max_concurrent_requests)",
+    "   - Edit /data/ch12_vendor_eval/config/experiment.yaml to define:",
+    "       - workloads to include",
+    "       - metrics to compute (BLEU, COMET, etc.)",
+    "       - concurrency settings",
+    "       - paths to compliance rulesets per domain.",
+    "",
+    "5. Run the baseline experiment.",
+    "   - From the project root (or inside the Docker container), execute:",
+    "       - python experiments/ch12_vendor_eval/run_experiment.py \\",
+    "           --config data/ch12_vendor_eval/config/experiment.yaml \\",
+    "           --vendors baseline_only \\",
+    "           --out-dir artifacts/ch12_vendor_eval/baseline",
+    "   - This will:",
+    "       - Send all workload segments to the baseline_single_vendor adapter only.",
+    "       - Store raw outputs under artifacts/ch12_vendor_eval/baseline/raw/",
+    "       - Compute metrics for the baseline and store them under artifacts/ch12_vendor_eval/baseline/metrics/ as JSON/CSV files.",
+    "",
+    "6. Run the multi-vendor bake-off.",
+    "   - Execute:",
+    "       - python experiments/ch12_vendor_eval/run_experiment.py \\",
+    "           --config data/ch12_vendor_eval/config/experiment.yaml \\",
+    "           --vendors all \\",
+    "           --out-dir artifacts/ch12_vendor_eval/bakeoff",
+    "   - This will:",
+    "       - For each vendor listed in vendors.yaml, send all segments for each workload and language pair.",
+    "       - Save raw outputs per vendor under artifacts/ch12_vendor_eval/bakeoff/raw/{vendor_id}/",
+    "       - Compute metrics (auto_quality_bleu, auto_quality_comet, terminology_accuracy, compliance_violation_rate, latency_p50, latency_p95, throughput, cost_per_1000_words) and store them in artifacts/ch12_vendor_eval/bakeoff/metrics/summary_{vendor_id}.json.",
+    "",
+    "7. Run human evaluation (optional but strongly recommended).",
+    "   - Use the script to generate blinded evaluation packs:",
+    "       - python experiments/ch12_vendor_eval/prepare_human_eval.py \\",
+    "           --bakeoff-dir artifacts/ch12_vendor_eval/bakeoff/raw \\",
+    "           --out-dir artifacts/ch12_vendor_eval/human_eval_packs",
+    "   - Distribute evaluation packs and rubric (from /experiments/ch12_vendor_eval/docs/human_eval_guidelines.md) to reviewers.",
+    "   - After collection, aggregate scores:",
+    "       - python experiments/ch12_vendor_eval/aggregate_human_eval.py \\",
+    "           --eval-input artifacts/ch12_vendor_eval/human_eval_results \\",
+    "           --out artifacts/ch12_vendor_eval/metrics/human_eval_summary.json",
+    "",
+    "8. Analyze results and compare baseline vs. treatment.",
+    "   - Run the analysis notebook or script:",
+    "       - jupyter notebook notebooks/ch12_vendor_eval_analysis.ipynb",
+    "       - or: python experiments/ch12_vendor_eval/analyze_results.py \\",
+    "             --baseline artifacts/ch12_vendor_eval/baseline/metrics \\",
+    "             --bakeoff artifacts/ch12_vendor_eval/bakeoff/metrics \\",
+    "             --human-eval artifacts/ch12_vendor_eval/metrics/human_eval_summary.json \\",
+    "             --out artifacts/ch12_vendor_eval/reports",
+    "   - This step should:",
+    "       - Generate plots and tables comparing metrics across vendors and workloads.",
+    "       - Run basic statistical significance tests for key metrics.",
+    "       - Produce a vendor-ranking and configuration-recommendation report (e.g., preferred vendor per domain/language, plus backup options).",
+    "",
+    "9. (Optional) Evaluate a proposed hybrid routing policy.",
+    "   - Define a routing policy in /data/ch12_vendor_eval/config/routing_policy.yaml, specifying vendor choices by language, risk tier, and domain.",
+    "   - Simulate the hybrid configuration results by combining vendor outputs and metrics according to this policy:",
+    "       - python experiments/ch12_vendor_eval/simulate_hybrid.py \\",
+    "           --metrics-dir artifacts/ch12_vendor_eval/bakeoff/metrics \\",
+    "           --routing-config data/ch12_vendor_eval/config/routing_policy.yaml \\",
+    "           --out artifacts/ch12_vendor_eval/metrics/hybrid_summary.json",
+    "   - Compare hybrid_summary.json against baseline metrics using the analysis tool to determine if success_criteria are met.",
+    "",
+    "10. Archive experiment artifacts and document decisions.",
+    "   - Save the final report (PDF/HTML) and metrics JSON files for audit and governance purposes under artifacts/ch12_vendor_eval/reports/ with a timestamp.",
+    "   - Record selected vendors, excluded vendors (and reasons), and the chosen hybrid routing policy in a decision log (e.g., /governance/decisions/ch12_vendor_selection.md)."
+  ],
+  "evidence_schema": {
+    "raw_output_record": {
+      "type": "object",
+      "required": [
+        "segment_id",
+        "workload",
+        "source_lang",
+        "target_lang",
+        "source_text",
+        "vendor_id",
+        "output_text",
+        "request_metadata",
+        "response_metadata",
+        "timestamp_utc"
+      ],
+      "properties": {
+        "segment_id": {
+          "type": "string",
+          "description": "Stable identifier for the source segment across all vendors."
+        },
+        "workload": {
+          "type": "string",
+          "enum": [
+            "pharma_patient_info_high_risk",
+            "finance_marketing_and_disclosures_medium_risk",
+            "b2b_saas_ui_and_help_low_to_medium_risk"
+          ]
+        },
+        "source_lang": {
+          "type": "string",
+          "description": "Source language code (e.g., 'en')."
+        },
+        "target_lang": {
+          "type": "string",
+          "description": "Target language code (e.g., 'de', 'fr')."
+        },
+        "source_text": {
+          "type": "string",
+          "description": "Original source string; must be de-identified per governance controls."
+        },
+        "vendor_id": {
+          "type": "string",
+          "description": "Logical vendor identifier (e.g., 'baseline_single_vendor', 'vendor_mt_a')."
+        },
+        "output_text": {
+          "type": "string",
+          "description": "Raw translation output text as returned by the vendor (before any human editing)."
+        },
+        "request_metadata": {
+          "type": "object",
+          "properties": {
+            "request_id": {
+              "type": "string"
+            },
+            "api_endpoint": {
+              "type": "string"
+            },
+            "model_id": {
+              "type": "string"
+            },
+            "parameters": {
+              "type": "object",
+              "description": "Serialized request parameters (e.g., temperature, domain flags) without sensitive secrets."
+            },
+            "sent_timestamp_utc": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        },
+        "response_metadata": {
+          "type": "object",
+          "properties": {
+            "status_code": {
+              "type": "integer"
+            },
+            "received_timestamp_utc": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "raw_latency_ms": {
+              "type": "number"
+            },
+            "error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "timestamp_utc": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when this record was written to storage."
+        }
+      }
+    },
+    "metrics_record": {
+      "type": "object",
+      "required": [
+        "vendor_id",
+        "workload",
+        "source_lang",
+        "target_lang",
+        "metric_name",
+        "metric_value",
+        "metric_unit",
+        "aggregation_level"
+      ],
+      "properties": {
+        "vendor_id": {
+          "type": "string"
+        },
+        "workload": {
+          "type": "string"
+        },
+        "source_lang": {
+          "type": "string"
+        },
+        "target_lang": {
+          "type": "string"
+        },
+        "metric_name": {
+          "type": "string",
+          "enum": [
+            "auto_quality_bleu",
+            "auto_quality_comet",
+            "human_quality_score",
+            "critical_error_rate",
+            "terminology_accuracy",
+            "compliance_violation_rate",
+            "latency_p50",
+            "latency_p95",
+            "throughput",
+            "cost_per_1000_words",
+            "post_editing_effort"
+          ]
+        },
+        "metric_value": {
+          "type": "number"
+        },
+        "metric_unit": {
+          "type": "string"
+        },
+        "aggregation_level": {
+          "type": "string",
+          "enum": [
+            "segment",
+            "language_pair",
+            "workload",
+            "system_overall"
+          ]
+        },
+        "aggregation_details": {
+          "type": "object",
+          "description": "Optional additional metadata such as number of segments, words, or confidence intervals.",
+          "properties": {
+            "num_segments": {
+              "type": "integer"
+            },
+            "num_words": {
+              "type": "integer"
+            },
+            "confidence_interval_95": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "number"
+              }
+            }
+          }
+        },
+        "computed_at_utc": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "human_evaluation_record": {
+      "type": "object",
+      "required": [
+        "eval_id",
+        "segment_id",
+        "workload",
+        "target_lang",
+        "anonymous_system_id",
+        "annotator_id",
+        "scores",
+        "flags"
+      ],
+      "properties": {
+        "eval_id": {
+          "type": "string"
+        },
+        "segment_id": {
+          "type": "string"
+        },
+        "workload": {
+          "type": "string"
+        },
+        "target_lang": {
+          "type": "string"
+        },
+        "anonymous_system_id": {
+          "type": "string",
+          "description": "System identifier blinded from annotators; mapping to vendor_id is stored separately."
+        },
+        "annotator_id": {
+          "type": "string",
+          "description": "Pseudonymous identifier for the human evaluator."
+        },
+        "scores": {
+          "type": "object",
+          "properties": {
+            "adequacy": {
+              "type": "number"
+            },
+            "fluency": {
+              "type": "number"
+            },
+            "overall": {
+              "type": "number"
+            }
+          }
+        },
+        "flags": {
+          "type": "object",
+          "properties": {
+            "critical_error": {
+              "type": "boolean"
+            },
+            "compliance_issue": {
+              "type": "boolean"
+            },
+            "terminology_issue": {
+              "type": "boolean"
+            }
+          }
+        },
+        "comments": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timestamp_utc": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "decision_record": {
+      "type": "object",
+      "required": [
+        "experiment_id",
+        "timestamp_utc",
+        "selected_vendors",
+        "excluded_vendors",
+        "routing_policy_summary",
+        "rationale",
+        "sign_offs"
+      ],
+      "properties": {
+        "experiment_id": {
+          "type": "string"
+        },
+        "timestamp_utc": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "selected_vendors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "vendor_id",
+              "roles"
+            ],
+            "properties": {
+              "vendor_id": {
+                "type": "string"
+              },
+              "roles": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "E.g., primary_mt_pharma, backup_mt_finance, lsp_high_risk_postedit."
+                }
+              }
+            }
+          }
+        },
+        "excluded_vendors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "vendor_id",
+              "reason"
+            ],
+            "properties": {
+              "vendor_id": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "routing_policy_summary": {
+          "type": "object",
+          "description": "High-level summary of the adopted hybrid routing policy (e.g., by workload and language pair)."
+        },
+        "rationale": {
+          "type": "string",
+          "description": "Narrative summary referencing key metrics and qualitative considerations (risk, governance, contracts)."
+        },
+        "sign_offs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "role",
+              "name_or_id",
+              "timestamp_utc"
+            ],
+            "properties": {
+              "role": {
+                "type": "string",
+                "description": "E.g., Localization Lead, Compliance Officer, Legal Counsel."
+              },
+              "name_or_id": {
+                "type": "string"
+              },
+              "timestamp_utc": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,423 @@
+{
+  "experiment_id": "exp-ch09-compliance-pipeline-prepost-v1",
+  "hypothesis": "Embedding automated regulatory compliance checks (rule-based + ML) and redaction into the localization pipeline, both pre- and post-localization, will (a) significantly increase the detection rate of compliance-relevant issues and (b) reduce residual high-severity violations in finalized localized content, without increasing average end-to-end pipeline latency by more than 20% relative to a baseline pipeline that relies on manual, end-of-process legal review only.",
+  "baseline": {
+    "description": "Baseline AI localization pipeline with manual, end-of-process legal review only and minimal technical compliance controls.",
+    "workflow_stages": [
+      "ingestion: content (e.g., pharma IFU, financial disclosure) pulled from sample CMS/TMS export",
+      "localization: MT/LLM-based translation with terminology support from Chapter 5 baseline",
+      "basic-QA: non-compliance-focused QA (length, placeholders, tags)",
+      "export: localized artifacts exported for human linguistic review and single consolidated legal review at the end",
+      "legal-review: manual legal/compliance review using a static checklist; corrections applied ad hoc outside the automated pipeline"
+    ],
+    "compliance_controls": {
+      "pre_localization": "none beyond manual authoring guidelines",
+      "in_pipeline": "no automated redaction; no automated compliance screening; no controlled-vocabulary enforcement beyond generic glossary checks",
+      "post_localization": "single manual legal/compliance review relying on human spotting of issues; no structured machine support"
+    },
+    "data_handling": {
+      "pii_phr": "PII/PHI present in some workloads is not automatically redacted before MT/LLM calls; assumes a trusted vendor and BAA/DPA but no technical enforcement",
+      "logging": "minimal operational logs only (errors, durations); no structured compliance evidence logs"
+    },
+    "human_in_the_loop": {
+      "linguistic_review": "optional linguistic review for all workloads, focused on language quality, not structured compliance criteria",
+      "legal_review": "mandatory manual review for high-risk content only (pharma and finance workloads); medium-risk content may skip legal review in baseline configuration"
+    }
+  },
+  "treatment": {
+    "description": "Enhanced AI localization pipeline with automated rule-based and ML-driven compliance checks, redaction/anonymization, controlled vocabularies, and structured audit logging integrated pre- and post-localization.",
+    "workflow_stages": [
+      "ingestion: same as baseline; content pulled from identical sources and normalized",
+      "pre-screening: automated PII/PHI detection + redaction/anonymization; high-risk topics flagged using ML classifier; jurisdiction tagging",
+      "pre-localization-compliance-checks: rule-based checks on source content against jurisdiction-specific policies (e.g., forbidden phrases, missing mandatory disclosures); controlled-vocabulary enforcement for regulated terms",
+      "localization: MT/LLM-based translation with same engines as baseline; MT prompts enriched with compliance constraints (e.g., \"use approved terms\", \"do not add unapproved claims\")",
+      "post-localization-compliance-checks: rule-based + ML checks on localized content (forbidden claims, risk wording, presence/absence of mandated statements, PII leakage, high-risk entities); terminological compliance verification vs. approved term lists",
+      "audit-logging: structured, append-only logs of every compliance rule evaluation, ML model score, redaction operation, and human override with timestamps and content hashes",
+      "human-review: risk-based routing: (a) compliance-flagged items must go through legal review; (b) non-flagged but high-risk asset types get sample-based legal review; (c) low-risk items may be auto-approved if passing all checks",
+      "legal-signoff: legal reviewers work from a compliance console-like view summarizing detected and resolved issues; approval is logged with reviewer ID and version hash"
+    ],
+    "compliance_controls": {
+      "pre_localization": {
+        "pii_redaction": "Automatic masking/replacement of PII/PHI using a rule-based + ML NER stack before sending text to external MT/LLM services; reversible mapping held in a secure local store if business needs require de-anonymization.",
+        "source_content_checks": "Regex- and rule-based checks for known regulatory clauses (e.g., presence of EMA/FDA-mandated statements; FINRA/SEC disclaimers); ML topic/risk classifier to flag content as pharma-safety, financial-promo, generic, etc.",
+        "controlled_vocab_source": "Validation that certain regulated source phrases map to an approved set of source-language terms (e.g., medical indications, risk categories)."
+      },
+      "post_localization": {
+        "target_compliance_rules": "Language-specific rule sets enforcing: (a) no unapproved therapeutic claims, (b) required risk disclosures present, (c) no prohibited financial promises, (d) labels/warnings preserved.",
+        "terminology_enforcement": "Check that key regulated terms in the target text use approved localized equivalents from controlled vocabularies; log any deviations with suggested fixes.",
+        "residual_pii_detection": "Run PII detector on target text to ensure redaction is still in effect and no PII/PHI leaked via model hallucination."
+      }
+    },
+    "auditability": {
+      "logging": "All compliance checks (rule and ML) emit structured JSON entries including content_id, version, rule_id/model_id, input hash, output, decision (pass/fail/uncertain), severity, and remediation_action.",
+      "evidence_generation": "For each localized artifact, a machine-readable 'compliance dossier' is produced aggregating checks, redactions, reviewer actions, and approvals; hashes allow verifying content integrity.",
+      "replayability": "Deterministic seeds for ML inference (where supported) and pinned model versions ensure reproducible re-runs of checks on the same content snapshot."
+    }
+  },
+  "workloads": [
+    {
+      "id": "w1-pharma-ifus",
+      "description": "Pharmaceutical Instructions for Use (IFU), patient leaflets, and safety communications in English localized into Spanish (es-ES) and German (de-DE).",
+      "risk_profile": "high",
+      "regulatory_context": [
+        "EU EMA medicinal product information requirements",
+        "FDA guidance on prescription drug labeling (for US-origin text as a proxy)",
+        "Data protection where patient stories are present (GDPR/PHI-like scenarios)"
+      ],
+      "characteristics": {
+        "documents": 50,
+        "avg_length_tokens": 800,
+        "pii_presence": "medium (patient names, dates, case IDs present in subset)",
+        "compliance_anchors": "mandatory risk statements, contraindications, dosage sections, black-box warnings"
+      }
+    },
+    {
+      "id": "w2-financial-disclosures",
+      "description": "Retail investment product summaries and marketing disclosures in English localized into French (fr-FR) and German (de-DE).",
+      "risk_profile": "high",
+      "regulatory_context": [
+        "MiFID II product disclosures",
+        "Local advertising and marketing rules for financial products",
+        "Data protection where customer scenarios may include PII"
+      ],
+      "characteristics": {
+        "documents": 50,
+        "avg_length_tokens": 600,
+        "pii_presence": "low to medium (names in testimonials or scenarios)",
+        "compliance_anchors": "capital-at-risk statements, past-performance disclaimers, non-guarantee clauses"
+      }
+    },
+    {
+      "id": "w3-support-tickets-pii",
+      "description": "Customer support tickets with embedded PII/PHI (names, email addresses, account numbers, health-related info) in English localized into Spanish (es-ES).",
+      "risk_profile": "medium",
+      "regulatory_context": [
+        "GDPR data minimization and pseudonymization",
+        "HIPAA-like PHI privacy constraints where applicable",
+        "Corporate internal privacy policy for cross-border processing"
+      ],
+      "characteristics": {
+        "documents": 200,
+        "avg_length_tokens": 200,
+        "pii_presence": "high (structured and unstructured identifiers)",
+        "compliance_anchors": "complete removal or pseudonymization of PII/PHI in content sent to external vendors"
+      }
+    },
+    {
+      "id": "w4-lowrisk-marketing",
+      "description": "Generic low-risk marketing web copy (e.g., product features descriptions) in English localized into French (fr-FR). Used to measure false positive rate and latency impact.",
+      "risk_profile": "low",
+      "regulatory_context": [
+        "Standard advertising guidelines without sector-specific rules",
+        "Generic data protection considerations"
+      ],
+      "characteristics": {
+        "documents": 100,
+        "avg_length_tokens": 250,
+        "pii_presence": "low",
+        "compliance_anchors": "no specific mandated clauses; mainly brand and fairness constraints"
+      }
+    }
+  ],
+  "controls": {
+    "randomization": "For each workload, each document is randomly assigned to baseline or treatment pipeline using a fixed random seed; assignments are stratified by document type and risk markers so both arms contain comparable distributions of high-risk sections, PII density, and length.",
+    "content_versioning": "Input documents are stored as immutable, versioned artifacts (e.g., Git LFS or content-addressed storage) so baseline and treatment operate on identical inputs per-stratum, even if assignment differs.",
+    "translation_engine": "The same MT/LLM model versions, configs, and terminology resources are used in baseline and treatment; only compliance-specific stages differ.",
+    "environment": "Both pipelines run in identical container images with pinned dependencies and identical hardware/VM specs.",
+    "blinded_annotation": "Human legal/compliance annotators assessing residual violations see only the final localized text and a random anonymized document ID; they are blinded to whether content came from baseline or treatment pipeline.",
+    "order_effects": "For any document that needs human annotation, annotators do not see both baseline and treatment versions of the same document; documents are partitioned between annotators to avoid recall bias.",
+    "jurisdictional_rules": "Rule sets are frozen before the experiment and versioned; no mid-run rule adjustments are allowed. Any necessary corrections result in a new experiment_id."
+  },
+  "metrics": [
+    {
+      "name": "detected_compliance_issues_per_1k_tokens",
+      "unit": "issues/1000_tokens",
+      "description": "Number of compliance-relevant issues flagged automatically (rule-based + ML) per 1,000 tokens of source or target text, stratified by severity and workload."
+    },
+    {
+      "name": "residual_high_severity_violations_rate",
+      "unit": "violations/document",
+      "description": "Average count of confirmed high-severity regulatory violations per document remaining after pipeline completion and human legal review, as assessed by blinded expert annotators using a standardized rubric."
+    },
+    {
+      "name": "false_positive_issue_rate",
+      "unit": "fraction",
+      "description": "Fraction of automatically flagged issues that human legal/compliance reviewers label as 'not actually a violation nor risk'."
+    },
+    {
+      "name": "pii_leakage_rate",
+      "unit": "fraction",
+      "description": "Fraction of documents containing any unredacted PII/PHI in the content actually sent to external MT/LLM services (pre-localization leak) and in final localized outputs (post-localization leak)."
+    },
+    {
+      "name": "average_pipeline_latency",
+      "unit": "seconds/document",
+      "description": "Average end-to-end processing time from ingestion to ready-for-legal-review output for each document."
+    },
+    {
+      "name": "legal_review_time_per_document",
+      "unit": "minutes/document",
+      "description": "Average human legal/compliance review time per document, captured via UI event logs or manual time tracking."
+    },
+    {
+      "name": "legal_escalation_rate",
+      "unit": "fraction",
+      "description": "Fraction of documents escalated by legal/compliance reviewers for further investigation or rework after initial review."
+    },
+    {
+      "name": "terminology_compliance_rate",
+      "unit": "fraction",
+      "description": "Fraction of required regulated terms in the target language that match the approved controlled vocabulary entries, computed per document."
+    }
+  ],
+  "success_criteria": {
+    "primary": [
+      {
+        "description": "Residual high-severity violations are reduced by at least 50% in the treatment pipeline compared to baseline for high-risk workloads (w1, w2).",
+        "metric": "residual_high_severity_violations_rate",
+        "target": "treatment <= 0.5 * baseline",
+        "statistical_test": "two-sided Mann\u2013Whitney U or permutation test over per-document violation counts; alpha = 0.05"
+      },
+      {
+        "description": "PII leakage to external MT/LLM services is effectively eliminated in treatment for high-PII workloads (w3), with no more than 1% of documents leaking any unredacted PII/PHI.",
+        "metric": "pii_leakage_rate",
+        "target": "treatment_pre_localization_leakage <= 0.01 and treatment_post_localization_leakage <= 0.01"
+      }
+    ],
+    "secondary": [
+      {
+        "description": "Average pipeline latency increase is no more than 20% in treatment compared to baseline across all workloads.",
+        "metric": "average_pipeline_latency",
+        "target": "treatment <= 1.2 * baseline"
+      },
+      {
+        "description": "Terminology compliance improves by at least 20 percentage points for regulated terms in high-risk workloads.",
+        "metric": "terminology_compliance_rate",
+        "target": "treatment >= baseline + 0.20"
+      },
+      {
+        "description": "False positive issue rate remains below 0.3 for high-risk workloads, to ensure legal teams are not overwhelmed by spurious flags.",
+        "metric": "false_positive_issue_rate",
+        "target": "treatment <= 0.30"
+      },
+      {
+        "description": "Average legal review time per document does not increase by more than 10% in treatment for high-risk workloads, and ideally decreases due to better triage.",
+        "metric": "legal_review_time_per_document",
+        "target": "treatment <= 1.1 * baseline"
+      }
+    ],
+    "interpretation_notes": "If primary criteria are met but latency or false positives exceed targets, the design may still be acceptable for highest-risk content but not for lower-risk pipelines; results should be stratified by workload and risk profile."
+  },
+  "failure_modes": [
+    {
+      "name": "ruleset_overfitting_or_gaps",
+      "description": "Rule-based checks are too narrow or too broad, either missing common violation patterns or triggering on benign patterns; this manifests as high residual violation rate or high false positive rate.",
+      "detection": "Discrepancy between automated detection metrics and human-annotated violation outcomes; clusters of false positive rules visible in rule-level metrics."
+    },
+    {
+      "name": "ml_model_misclassification",
+      "description": "Topic/risk classifiers fail to correctly identify high-risk content or hallucinate risk where there is none, leading to misrouted reviews.",
+      "detection": "Confusion matrices between ML output and human labels on a stratified sample; misclassification particularly around borderline cases (e.g., educational vs. promotional content)."
+    },
+    {
+      "name": "pii_redaction_incompleteness_or_overreach",
+      "description": "PII redaction misses some sensitive entities (increasing leakage risk) or redacts too aggressively, harming translation quality or interpretability.",
+      "detection": "Residual PII leakage metrics > target; reviewer feedback indicating that crucial non-PII content is masked; manual spot checks on samples with known PII."
+    },
+    {
+      "name": "pipeline_latency_regression",
+      "description": "Compliance screening stages add excessive latency beyond the 20% budget, making the treatment pipeline operationally unacceptable for time-sensitive workloads.",
+      "detection": "average_pipeline_latency metric breaching target, with profiling showing hotspots in certain models or rule engines."
+    },
+    {
+      "name": "audit_log_unusability",
+      "description": "Audit logs are too verbose, inconsistent, or poorly structured to be usable as evidence for regulators or internal auditors.",
+      "detection": "Manual inspection of generated 'compliance dossiers' reveals missing context, unlinked rules, or inability to trace from a final artifact back to checks and approvals."
+    },
+    {
+      "name": "legal_team_overload",
+      "description": "Increased number of automated flags leads to significant increase in legal review time and frustration, even if technical metrics look improved.",
+      "detection": "legal_review_time_per_document and legal_escalation_rate increase substantially; qualitative feedback from reviewers indicates alert fatigue."
+    }
+  ],
+  "required_environment": {
+    "runtime": {
+      "language": "Python 3.11 (or later, pinned in requirements.txt / pyproject.toml)",
+      "os": "Linux (e.g., Ubuntu 22.04) recommended; macOS supported for local runs; Windows via WSL2",
+      "containerization": "Docker with a reproducible image (e.g., Dockerfile in /experiments/ch09-compliance) pinning system and Python dependencies"
+    },
+    "dependencies": {
+      "nlp": [
+        "spaCy (with appropriate language models for en, es, de, fr) for rule-based NER and tokenization",
+        "HuggingFace Transformers + tokenizers for ML classifiers and PII detectors",
+        "sentencepiece or similar if underlying MT models require it"
+      ],
+      "ml": [
+        "scikit-learn or equivalent for evaluation utilities",
+        "PyTorch or TensorFlow (pinned versions) for classifier/NER models if not using API-based services"
+      ],
+      "workflow": [
+        "pydantic or dataclasses for typed configuration",
+        "Typer or Click for CLI orchestration",
+        "Prefect, Airflow, or a lightweight in-code orchestrator (depending on repository conventions)"
+      ],
+      "logging": [
+        "structlog or Python logging with JSON formatter for audit logs",
+        "sqlite or PostgreSQL (optional) as a backend for storing structured compliance events"
+      ]
+    },
+    "external_services": {
+      "mt_llm": "Either (a) a local MT/LLM model served via an internal endpoint, or (b) external API (e.g., Azure OpenAI, Google Cloud Translate) with API keys supplied via environment variables. The experiment code should treat MT/LLM as an abstract interface defined elsewhere in the repo.",
+      "storage": "File-based storage for input/output (.jsonl or .csv) plus a directory or bucket for logs (`artifacts/experiments/ch09-compliance`).",
+      "secrets": "API keys and database credentials supplied via environment variables or a .env file not committed to version control."
+    },
+    "datasets": {
+      "location": "Repository path such as `data/ch09_compliance/` with subdirectories `w1_pharma_ifus`, `w2_financial_disclosures`, `w3_support_tickets_pii`, `w4_lowrisk_marketing`.",
+      "format": "Each workload stored as JSONL with fields: `id`, `source_text`, `source_lang`, `target_lang`, `workload_id`, `risk_profile`, `jurisdiction`."
+    },
+    "reproducibility": {
+      "random_seeds": "Global random, NumPy, and PyTorch seeds set in a shared utility to a fixed integer (e.g., 90909).",
+      "config_files": "YAML/JSON config files specifying rule sets, model checkpoints, and thresholds under `configs/ch09_compliance/`.",
+      "version_pinning": "requirements.txt or lock file committed; Docker image version tagged with experiment_id."
+    }
+  },
+  "run_instructions": {
+    "overview": "The experiment compares a baseline pipeline with minimal compliance automation to a treatment pipeline embedding pre- and post-localization rule-based and ML-driven compliance checks, redaction, and audit logging. Both operate over identical workloads, with random assignment at document level. Outputs are then sampled for blinded human compliance annotation.",
+    "steps": [
+      "1. Clone repository and set up environment",
+      "   - `git clone https://github.com/bookauthority/ai-localization-quality-culture-compliance.git`",
+      "   - `cd ai-localization-quality-culture-compliance`",
+      "   - Ensure Docker is installed, or create a Python virtual environment if running without Docker.",
+      "   - If using Docker: `docker build -f experiments/ch09-compliance/Dockerfile -t ch09-compliance:latest .`",
+      "2. Configure credentials and environment variables",
+      "   - Copy `.env.example` from `experiments/ch09-compliance/` to `.env` and fill in MT/LLM API keys or local endpoint URLs, if required.",
+      "   - Set any database or storage paths if using DB-backed logging.",
+      "3. Prepare datasets",
+      "   - Verify datasets exist under `data/ch09_compliance/` as specified in required_environment.",
+      "   - If synthetic data generation scripts are provided (e.g., `scripts/ch09_generate_synthetic_data.py`), run them once to create demo workloads.",
+      "4. Generate experimental assignment",
+      "   - Run `python experiments/ch09-compliance/assign_documents.py --config configs/ch09_compliance/assignment.yaml --seed 90909`.",
+      "   - This writes a JSONL or CSV file mapping each document ID to `arm` in `{baseline, treatment}` while preserving stratification by workload and risk.",
+      "5. Run the baseline pipeline",
+      "   - Run `python experiments/ch09-compliance/run_pipeline.py --config configs/ch09_compliance/baseline.yaml --assignment artifacts/ch09_compliance/assignment.jsonl --arm baseline`.",
+      "   - This executes ingestion, localization, basic QA, export, and minimal logging.",
+      "   - Outputs are written to `artifacts/ch09_compliance/baseline/outputs/` with a per-document JSON containing `source_text`, `translated_text`, and metadata.",
+      "6. Run the treatment pipeline",
+      "   - Run `python experiments/ch09-compliance/run_pipeline.py --config configs/ch09_compliance/treatment.yaml --assignment artifacts/ch09_compliance/assignment.jsonl --arm treatment`.",
+      "   - This executes ingestion, pre-screening (redaction), pre-compliance checks, localization, post-compliance checks, and audit logging.",
+      "   - Outputs are written to `artifacts/ch09_compliance/treatment/outputs/` and compliance logs to `artifacts/ch09_compliance/treatment/logs/`.",
+      "7. Collect runtime metrics",
+      "   - Both pipeline runs log per-document timings; aggregate these by running `python experiments/ch09-compliance/aggregate_runtime_metrics.py --input artifacts/ch09_compliance/ --output artifacts/ch09_compliance/runtime_summary.json`.",
+      "8. Sample documents for human annotation",
+      "   - Use the sampling utility: `python experiments/ch09-compliance/sample_for_annotation.py --config configs/ch09_compliance/sampling.yaml --outputs-dir artifacts/ch09_compliance/ --output artifacts/ch09_compliance/human_annotation_batches/`.",
+      "   - This creates blinded annotation files for reviewers with no indication of baseline vs. treatment.",
+      "9. Conduct human compliance annotation",
+      "   - Provide annotators with annotation guidelines (e.g., `docs/ch09_compliance_guidelines.md`).",
+      "   - Collect completed annotations as JSONL with fields: `doc_id`, `arm_blinded`, `workload_id`, `violations`: [ { `severity`, `category`, `description` } ], `annotation_time_minutes`.",
+      "10. Evaluate experiment outcomes",
+      "   - Run `python experiments/ch09-compliance/evaluate.py --annotations artifacts/ch09_compliance/human_annotations/ --logs artifacts/ch09_compliance/ --output artifacts/ch09_compliance/eval_results.json`.",
+      "   - This script computes metrics defined in `metrics`, stratified by workload and arm, and (optionally) runs simple statistical tests.",
+      "11. Review audit logs and dossiers",
+      "   - Generate per-artifact compliance dossiers with `python experiments/ch09-compliance/generate_dossiers.py --logs artifacts/ch09_compliance/treatment/logs/ --outputs artifacts/ch09_compliance/treatment/outputs/ --output-dir artifacts/ch09_compliance/treatment/dossiers/`.",
+      "   - Manually inspect a subset to assess quality as potential regulator-facing evidence.",
+      "12. Archive experiment configuration",
+      "   - Save the exact configs, code commit hash, and environment metadata into `artifacts/ch09_compliance/manifest.json` for reproducibility."
+    ],
+    "notes": "All metric computations should be deterministic given fixed inputs and seeds. Any change to rules, models, or risk thresholds requires a new experiment_id or a clearly versioned configuration file."
+  },
+  "evidence_schema": {
+    "per_document_record": {
+      "fields": {
+        "doc_id": "string, unique identifier for each document",
+        "workload_id": "string, one of {w1-pharma-ifus, w2-financial-disclosures, w3-support-tickets-pii, w4-lowrisk-marketing}",
+        "arm": "string, 'baseline' or 'treatment'",
+        "source_lang": "string, e.g., 'en'",
+        "target_lang": "string, e.g., 'es-ES'",
+        "risk_profile": "string, e.g., 'high', 'medium', 'low'",
+        "jurisdiction": "string, e.g., 'EU', 'US', or combined codes",
+        "source_text_hash": "string, hash (e.g., SHA-256) of normalized source text",
+        "target_text_hash": "string, hash of final localized text",
+        "pii_present_in_source": "boolean or categorical flag based on automated detection",
+        "pii_sent_to_external": "boolean, indicates if any unredacted PII/PHI was included in text sent to MT/LLM",
+        "pii_present_in_output": "boolean, indicates if PII/PHI is present in final output",
+        "auto_issues": [
+          {
+            "rule_or_model_id": "string, identifier of rule or ML model",
+            "stage": "string, 'pre' or 'post'",
+            "severity": "string, e.g., 'low', 'medium', 'high'",
+            "category": "string, e.g., 'missing_disclosure', 'unapproved_claim', 'forbidden_phrase', 'pii_leak'",
+            "span": "optional text span or character offsets",
+            "decision": "string, 'flagged', 'ignored', 'auto_resolved'"
+          }
+        ],
+        "human_violations": [
+          {
+            "severity": "string, as per annotation rubric",
+            "category": "string, aligned with regulatory taxonomy",
+            "description": "string, free-text explanation",
+            "is_regulatory_breach": "boolean"
+          }
+        ],
+        "terminology_compliance": {
+          "required_terms": "integer, count of required regulated terms expected",
+          "noncompliant_terms": "integer, count of terms not matching controlled vocabulary",
+          "compliance_rate": "float, 1 - noncompliant_terms/required_terms (or null if not applicable)"
+        },
+        "timings": {
+          "start_time_utc": "ISO 8601 timestamp when pipeline started for this doc",
+          "end_time_utc": "ISO 8601 timestamp when pipeline finished",
+          "pipeline_latency_seconds": "float, end - start",
+          "legal_review_time_minutes": "float or null if not reviewed"
+        },
+        "legal_outcome": {
+          "requires_escalation": "boolean",
+          "approved": "boolean or null if not reviewed",
+          "approval_reviewer_id": "string or null",
+          "approval_timestamp_utc": "ISO 8601 timestamp or null"
+        },
+        "audit_trail_reference": {
+          "log_file": "string, path to raw log file",
+          "dossier_file": "string, path to compiled compliance dossier for this doc"
+        }
+      }
+    },
+    "aggregate_record": {
+      "fields": {
+        "experiment_id": "string, 'exp-ch09-compliance-pipeline-prepost-v1'",
+        "arm": "string, 'baseline' or 'treatment'",
+        "workload_id": "string or 'all'",
+        "n_documents": "integer, number of documents in this aggregation",
+        "metrics": {
+          "detected_compliance_issues_per_1k_tokens": "float",
+          "residual_high_severity_violations_rate": "float",
+          "false_positive_issue_rate": "float",
+          "pii_leakage_rate_pre_localization": "float",
+          "pii_leakage_rate_post_localization": "float",
+          "average_pipeline_latency": "float",
+          "legal_review_time_per_document": "float",
+          "legal_escalation_rate": "float",
+          "terminology_compliance_rate": "float"
+        },
+        "ci_or_intervals": {
+          "detected_compliance_issues_per_1k_tokens": "optional 95% confidence interval",
+          "residual_high_severity_violations_rate": "optional 95% confidence interval",
+          "average_pipeline_latency": "optional 95% confidence interval"
+        },
+        "statistical_tests": {
+          "vs_other_arm": {
+            "metric": "string",
+            "p_value": "float",
+            "test_name": "string, e.g., 'mann_whitney_u'"
+          }
+        },
+        "config_snapshot": {
+          "baseline_config_path": "string",
+          "treatment_config_path": "string",
+          "git_commit_hash": "string",
+          "ruleset_versions": "mapping from ruleset name to version/tag",
+          "model_versions": "mapping from model name to version/checkpoint"
+        }
+      }
+    }
+  }
+}

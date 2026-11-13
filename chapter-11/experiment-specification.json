@@ -1,0 +1,497 @@
+{
+  "experiment_id": "exp-ch11-linguistic-assets-tm-terms-vs-none-v1",
+  "hypothesis": "For enterprise localization workloads, integrating cleaned translation memories (TM), enforced terminology (glossaries), and vector-based example retrieval into an AI-driven translation pipeline will (a) improve linguistic and terminological quality, (b) increase adherence to style and brand voice, and (c) reduce human post-editing effort and cycle time, compared to an otherwise identical pipeline that does not use these linguistic assets.",
+  "baseline": {
+    "description": "AI-driven localization pipeline without explicit use of translation memories, termbases, or vector-retrieved examples. The system relies solely on a general-purpose MT/LLM engine plus minimal generic constraints.",
+    "pipeline_steps": [
+      "Content ingestion from prepared test set (JSON/CSV/XLIFF).",
+      "Language detection (for validation only; not used for routing here).",
+      "Segment-level translation using a single, fixed MT or LLM engine with default or lightly customized prompt (no TM or glossary injection).",
+      "Light structural QA: placeholder/tag preservation, length ratio checks, basic script checks.",
+      "Export of translations for offline human post-editing and evaluation."
+    ],
+    "configuration": {
+      "mt_engine": "Configured MT or LLM provider (e.g., open-source MT model or commercial MT/LLM via API) with a fixed model version and deterministic decoding settings where possible (e.g., temperature=0 for LLMs).",
+      "no_tm_lookup": true,
+      "no_glossary_enforcement": true,
+      "no_vector_retrieval": true,
+      "prompt_template_llm": "You are a professional translator. Translate the following text from {source_lang} to {target_lang}, preserving meaning and formatting."
+    }
+  },
+  "treatment": {
+    "description": "AI-driven localization pipeline that integrates cleaned translation memories, enforced termbases, and vector search over example translations/style snippets, keeping all other components aligned with the baseline.",
+    "pipeline_steps": [
+      "Inventory and cleaning of TMs and termbases (pre-experiment; see required_environment and run_instructions).",
+      "Content ingestion from the same prepared test set as baseline.",
+      "Language detection and validation of expected language pairs.",
+      "Per-segment TM lookup with configurable fuzzy threshold (e.g., 75\u201385%) and penalty model; use of exact/FUZZY matches where applicable.",
+      "Terminology application and enforcement: injecting term pairs and non-translatable lists into MT/LLM calls; post-generation terminology checking and optional constrained re-generation where possible.",
+      "Vector search against a sentence-level or paragraph-level embedding index built from curated bilingual corpora and style guides; retrieval of top-k similar examples and style patterns per segment.",
+      "Segment-level translation using the same MT/LLM engine as baseline, but with: (a) TM matches provided as candidates, (b) glossary constraints, and (c) retrieved examples and style hints embedded in the prompt or adapter logic.",
+      "Post-generation QA: structural checks (as baseline) plus terminology adherence checks and optional automatic correction for straightforward violations.",
+      "Export of translations for offline human post-editing and evaluation (same format as baseline).",
+      "Logging of TM hits, terminology violations, and vector retrieval metadata for ROI analysis."
+    ],
+    "configuration": {
+      "mt_engine": "Same engine/model version as baseline.",
+      "tm_sources": [
+        "Cleaned bilingual TMs for at least two language pairs (e.g., en->fr, en->de) in standard formats such as TMX or aligned CSV/TSV."
+      ],
+      "termbase_sources": [
+        "Termbase files (e.g., TBX/CSV) including preferred terms, forbidden terms, part-of-speech, domain, and status.",
+        "Non-translatable lists (e.g., product names, trademarks)."
+      ],
+      "vector_store": {
+        "embedding_model": "Sentence-level multilingual embedding model (e.g., LaBSE, multilingual-MiniLM, or equivalent) with fixed version.",
+        "index_type": "FAISS or equivalent approximate nearest neighbor index.",
+        "corpus": [
+          "Curated bilingual examples from TMs.",
+          "Approved style snippets and microcopy (e.g., UI strings, marketing taglines) tagged with language, market, and domain."
+        ],
+        "top_k": 3
+      },
+      "tm_match_thresholds": {
+        "exact": 100,
+        "high_fuzzy_min": 85,
+        "low_fuzzy_min": 75
+      },
+      "glossary_enforcement_mode": "soft-preference-with-post-check (preferred) or hard-constraint-if-supported (alternate branch).",
+      "prompt_template_llm": "You are a professional translator working for a regulated enterprise.\nTranslate the following source text from {source_lang} to {target_lang}.\n\nFollow these requirements:\n- Use the preferred terms from the glossary exactly as given.\n- Respect non-translatable items; leave them unchanged.\n- Follow the style and tone demonstrated in the examples.\n- If a high-quality TM candidate is provided, treat it as the primary suggestion unless it is clearly wrong.\n\nGlossary entries (source -> target):\n{glossary_entries}\n\nNon-translatable items:\n{non_translatables}\n\nTM candidate translations (if any):\n{tm_candidates}\n\nStyle examples (source -> target):\n{style_examples}\n\nSource text:\n{source_text}"
+    }
+  },
+  "workloads": [
+    {
+      "name": "workload-marketing-high-style",
+      "description": "Marketing and brand copy with strong style and terminology requirements (e.g., homepage hero, product landing pages, email headlines).",
+      "content_characteristics": {
+        "domains": [
+          "B2B SaaS marketing",
+          "consumer tech marketing"
+        ],
+        "risk_level": "medium",
+        "segment_count": 500,
+        "average_segment_length_chars": 120,
+        "languages": [
+          "en->fr",
+          "en->de"
+        ],
+        "asset_overlap_expectation": "High overlap with existing TMs and termbases; strong style guidance available."
+      },
+      "source_dataset_location": "repository/data/ch11/workload_marketing/source.jsonl",
+      "references_location": "repository/data/ch11/workload_marketing/references.jsonl",
+      "tm_coverage_annotation": "Include metadata estimating per-segment TM fuzzy match score for analysis (computed offline)."
+    },
+    {
+      "name": "workload-product-ui-terminology-heavy",
+      "description": "Product UI strings and in-app messages with strict terminology and non-translatable requirements (e.g., feature names, legal notices in-app).",
+      "content_characteristics": {
+        "domains": [
+          "B2B SaaS product UI"
+        ],
+        "risk_level": "high",
+        "segment_count": 800,
+        "average_segment_length_chars": 60,
+        "languages": [
+          "en->es",
+          "en->fr"
+        ],
+        "asset_overlap_expectation": "Very high termbase coverage; moderate TM coverage."
+      },
+      "source_dataset_location": "repository/data/ch11/workload_ui/source.xliff",
+      "references_location": "repository/data/ch11/workload_ui/references.xliff",
+      "tm_coverage_annotation": "Per-segment TM fuzziness tags and term coverage flags included in metadata."
+    },
+    {
+      "name": "workload-support-knowledgebase-mixed",
+      "description": "Support/knowledge base articles with mixed style needs but high consistency expectations across versions.",
+      "content_characteristics": {
+        "domains": [
+          "customer support",
+          "how-to guides"
+        ],
+        "risk_level": "medium",
+        "segment_count": 600,
+        "average_segment_length_chars": 200,
+        "languages": [
+          "en->de",
+          "en->ja"
+        ],
+        "asset_overlap_expectation": "Moderate TM coverage; partial termbase coverage; style guidance weaker than marketing domain."
+      },
+      "source_dataset_location": "repository/data/ch11/workload_kb/source.jsonl",
+      "references_location": "repository/data/ch11/workload_kb/references.jsonl",
+      "tm_coverage_annotation": "Metadata with TM fuzziness and domain tags for sub-analysis."
+    }
+  ],
+  "controls": {
+    "data_controls": [
+      "Use identical source segments and language pairs for baseline and treatment across all workloads.",
+      "Randomize segment processing order but ensure both baseline and treatment see the same order within each run (controlled random seed).",
+      "Split data into calibration set (for prompt/treshold tuning) and evaluation set; never tune on evaluation set.",
+      "Ensure that reference translations used for evaluation are not directly taken from TMs used in the treatment (avoid trivial leakage); if unavoidable, mark such segments for separate reporting."
+    ],
+    "model_controls": [
+      "Use the same MT/LLM model version, decoding parameters, and API region for baseline and treatment.",
+      "Fix random seeds where supported (e.g., for open-source models); for APIs without deterministic guarantees, run multiple repetitions and report mean/variance.",
+      "Disable vendor-side glossary/TM features in both conditions unless they can be configured identically; the differential factor must remain the explicit TM/termbase/vector logic implemented in this experiment."
+    ],
+    "environment_controls": [
+      "Run baseline and treatment in the same compute environment (same container image, hardware, and dependency versions).",
+      "Throttle or batch requests identically across conditions to reduce effects of rate limiting and latency spikes.",
+      "Log all configuration (YAML/JSON) snapshots with a run_id to ensure reproducibility."
+    ],
+    "human_evaluation_controls": [
+      "Use the same pool of professional linguists for both baseline and treatment outputs, blinded to condition.",
+      "Randomize presentation order of segments and conditions in the evaluation UI.",
+      "Provide consistent, written evaluation guidelines with examples of acceptable/unacceptable terminology and style.",
+      "Enforce calibration: evaluators must rate a small shared calibration set and achieve acceptable inter-rater agreement before evaluating the full set."
+    ]
+  },
+  "metrics": [
+    {
+      "name": "automatic_bleu",
+      "unit": "BLEU score (0\u2013100)",
+      "description": "Corpus-level BLEU score comparing system output to reference translations, computed per workload and language pair."
+    },
+    {
+      "name": "automatic_comet",
+      "unit": "COMET score (model-dependent scale, typically -1 to 1 or 0\u20131)",
+      "description": "Reference-based COMET scores for translation quality, computed per segment and aggregated by workload."
+    },
+    {
+      "name": "terminology_accuracy",
+      "unit": "percentage (0\u2013100%)",
+      "description": "Proportion of required glossary occurrences that are correctly realized with preferred target terms and no forbidden terms, computed over segments with at least one glossary term."
+    },
+    {
+      "name": "terminology_violation_rate",
+      "unit": "percentage (0\u2013100%)",
+      "description": "Proportion of segments containing at least one usage of a forbidden term or missing a required term."
+    },
+    {
+      "name": "style_consistency_score",
+      "unit": "Likert mean (1\u20135)",
+      "description": "Average human rating of style/voice consistency with provided style guide and examples, on a 1\u20135 scale."
+    },
+    {
+      "name": "overall_human_quality_score",
+      "unit": "Likert mean (1\u20135)",
+      "description": "Average human rating of overall translation quality (meaning, fluency, terminology, style) per segment."
+    },
+    {
+      "name": "post_editing_effort_time",
+      "unit": "seconds per segment",
+      "description": "Average time taken by professional linguists to post-edit a segment to approval quality, measured via annotation tool logs."
+    },
+    {
+      "name": "post_editing_keystrokes",
+      "unit": "keystrokes per segment",
+      "description": "Average number of editing keystrokes (insertions, deletions) performed to finalize a segment."
+    },
+    {
+      "name": "asset_hit_rate_tm",
+      "unit": "percentage (0\u2013100%)",
+      "description": "Proportion of segments in the treatment condition where a TM match above the configured fuzziness threshold was found and used."
+    },
+    {
+      "name": "asset_hit_rate_termbase",
+      "unit": "percentage (0\u2013100%)",
+      "description": "Proportion of segments in the treatment condition that contain at least one term from the termbase."
+    },
+    {
+      "name": "asset_hit_rate_vector",
+      "unit": "percentage (0\u2013100%)",
+      "description": "Proportion of segments in the treatment condition where the vector search returned at least one example above the similarity threshold."
+    },
+    {
+      "name": "cycle_time_pipeline",
+      "unit": "seconds per 1000 characters",
+      "description": "End-to-end machine pipeline time from ingestion to export per 1000 source characters for baseline and treatment."
+    },
+    {
+      "name": "estimated_roi",
+      "unit": "currency (e.g., USD) per month at scale",
+      "description": "Derived metric combining post-editing effort reduction and asset maintenance cost to estimate net monthly savings given assumed volume; formula documented in evidence schema."
+    }
+  ],
+  "success_criteria": {
+    "primary": [
+      "Terminology accuracy improves by at least 15 percentage points (absolute) in the treatment vs baseline, with p < 0.05 on a segment-level statistical test (e.g., McNemar's test on matched segments).",
+      "Average post_editing_effort_time decreases by at least 20% in the treatment vs baseline for at least two of the three workloads, with p < 0.05 (paired test on segment-level times)."
+    ],
+    "secondary": [
+      "Overall_human_quality_score increases by at least 0.3 points on the 1\u20135 scale in the treatment vs baseline for at least two workloads.",
+      "Style_consistency_score increases by at least 0.3 points on the 1\u20135 scale in the marketing workload.",
+      "Estimated_roi is positive under realistic volume and rate assumptions documented in the experiment configuration.",
+      "Automatic_comet improves significantly (e.g., effect size d >= 0.3) on segments with TM or termbase hits, while not degrading materially (no drop greater than 0.1) on segments without assets."
+    ],
+    "interpretation_notes": [
+      "If treatment improves terminology accuracy and post-edit effort but slightly increases cycle_time_pipeline, this can still be considered successful if ROI remains positive under documented assumptions.",
+      "Results should be stratified by TM coverage tiers (e.g., no match, low fuzzy, high fuzzy) and termbase presence to understand where assets contribute the most."
+    ]
+  },
+  "failure_modes": [
+    {
+      "name": "overfitting_to_tm_errors",
+      "description": "Treatment may propagate incorrect or outdated TM entries more consistently, harming quality despite higher asset usage metrics.",
+      "detection": "Manual review of a sample of segments where treatment quality is rated lower than baseline and where a TM hit was used.",
+      "mitigation": "Flag TM segments with repeated low human scores for cleanup; re-run experiment with cleaned TM subset."
+    },
+    {
+      "name": "terminology_over_constraining",
+      "description": "Strict glossary enforcement may produce unnatural or grammatically incorrect sentences, especially in languages with complex morphology.",
+      "detection": "Compare human fluency ratings and error annotations focusing on morphology/grammar issues in segments with multiple enforced terms.",
+      "mitigation": "Switch from hard to soft glossary enforcement for specific languages; allow inflected variants; enhance prompt with examples of correct inflection."
+    },
+    {
+      "name": "vector_retrieval_noise",
+      "description": "Poorly tuned vector search may retrieve off-domain or mismatched style examples that confuse the MT/LLM.",
+      "detection": "Analyze segments with decreased human quality in treatment and high similarity scores from vector search.",
+      "mitigation": "Tighten similarity threshold, filter examples by domain/market tags, or limit the number of examples included."
+    },
+    {
+      "name": "evaluation_bias_from_tm_references",
+      "description": "If reference translations are identical or highly similar to TMs used in treatment, it may inflate quality metrics.",
+      "detection": "Compute similarity between references and TM entries; mark affected segments and analyze separately.",
+      "mitigation": "Exclude segments with high TM\u2013reference overlap from primary metric calculations; report them as a separate stratum."
+    },
+    {
+      "name": "tooling_latency_and_cost_spikes",
+      "description": "Additional TM lookups and vector searches may significantly increase latency or compute cost, reducing practical value.",
+      "detection": "Monitor cycle_time_pipeline and per-segment cost estimates; compare baseline vs treatment.",
+      "mitigation": "Cache TM/vector results, reduce top_k, or scope assets only to high-risk content types."
+    },
+    {
+      "name": "asset_governance_violations",
+      "description": "Ingesting or indexing sensitive TMs without proper access controls may violate data governance policies.",
+      "detection": "Pre-run audit of TM/termbase sources; verification that PII and confidential data are handled per policy.",
+      "mitigation": "Redact or anonymize sensitive data prior to indexing; enforce access controls and encryption in storage."
+    }
+  ],
+  "required_environment": {
+    "runtime": {
+      "language": "Python",
+      "version": ">=3.10",
+      "package_manager": "pip or poetry",
+      "notebooks": "Jupyter or equivalent for exploratory analysis and plots."
+    },
+    "dependencies": {
+      "core": [
+        "numpy",
+        "pandas",
+        "scikit-learn",
+        "pyyaml",
+        "requests",
+        "tqdm"
+      ],
+      "nlp_and_mt": [
+        "sacremoses or equivalent for tokenization",
+        "sacr\u00e9BLEU for BLEU computation",
+        "comet-ml or official COMET implementation",
+        "sentencepiece (if needed by MT model)"
+      ],
+      "llm_and_embeddings": [
+        "transformers",
+        "sentence-transformers",
+        "faiss-cpu or faiss-gpu"
+      ],
+      "evaluation_and_annotation": [
+        "streamlit or a lightweight web framework for human evaluation UI",
+        "sqlite3 or simple database for logging human ratings and post-editing actions"
+      ],
+      "containerization": [
+        "Docker (Dockerfile provided under repository/envs/ch11)",
+        "docker-compose or equivalent orchestration (optional)"
+      ]
+    },
+    "external_services": {
+      "mt_or_llm_provider": {
+        "description": "Either an on-prem open-source MT/LLM served via HTTP or a commercial MT/LLM API.",
+        "requirements": [
+          "Stable model version across the entire experiment.",
+          "Ability to fix decoding parameters (e.g., temperature, max_tokens).",
+          "Documented data handling to satisfy enterprise governance (no training on customer data unless explicitly allowed)."
+        ]
+      },
+      "storage": {
+        "tm_and_termbase_storage": "Secure file storage or database; read-only for experiment runs.",
+        "vector_index_storage": "Local disk or managed volume mounted into the container."
+      }
+    },
+    "data_assets": {
+      "translation_memories": [
+        "TMX or CSV/TSV files for each workload language pair, stored under repository/data/ch11/tm/.",
+        "Prior to experiment, run a cleaning script to remove duplicates, misaligned segments, and marked-invalid entries."
+      ],
+      "termbases": [
+        "TBX or CSV files with columns: source_term, target_term, language_pair, domain, status, forbidden_flag.",
+        "Stored under repository/data/ch11/termbase/."
+      ],
+      "style_guides_and_examples": [
+        "Short style guides in markdown or PDF for each domain-language pair.",
+        "Curated parallel examples with style tags under repository/data/ch11/style_examples/."
+      ]
+    },
+    "security_and_governance": {
+      "access_control": [
+        "Restrict raw TM and termbase directories to authorized users.",
+        "Enforce read-only mounts for TM/termbase paths in runtime containers."
+      ],
+      "logging": [
+        "Do not log full raw source or target content in plaintext in shared logs; instead, log hashed identifiers and aggregate metrics.",
+        "Separate audit logs (with content) stored in a restricted-access area for reproducibility and compliance."
+      ]
+    }
+  },
+  "run_instructions": {
+    "preparation": [
+      "Clone the repository: git clone https://github.com/bookauthority/ai-localization-quality-culture-compliance.git",
+      "Change to chapter 11 directory: cd ai-localization-quality-culture-compliance/ch11",
+      "Build the Docker image (recommended): docker build -t ailoc-ch11:latest -f ../envs/ch11/Dockerfile .",
+      "Prepare a configuration file: cp configs/ch11_default.yaml configs/ch11_experiment.yaml and adjust paths and provider keys as necessary.",
+      "Run TM and termbase cleaning scripts: python scripts/clean_tm.py --config configs/ch11_experiment.yaml and python scripts/clean_termbase.py --config configs/ch11_experiment.yaml; outputs go to data/ch11/cleaned_tm and data/ch11/cleaned_termbase.",
+      "Build the vector index: python scripts/build_vector_index.py --config configs/ch11_experiment.yaml; store index in data/ch11/vector_index/."
+    ],
+    "execution_steps": [
+      "Run baseline pipeline on all workloads:\n  docker run --rm -v $(pwd):/app ailoc-ch11:latest \\\n    python pipelines/run_pipeline.py \\\n      --config configs/ch11_experiment.yaml \\\n      --mode baseline \\\n      --workloads workload-marketing-high-style workload-product-ui-terminology-heavy workload-support-knowledgebase-mixed \\\n      --run_id baseline_v1",
+      "Run treatment pipeline on all workloads:\n  docker run --rm -v $(pwd):/app ailoc-ch11:latest \\\n    python pipelines/run_pipeline.py \\\n      --config configs/ch11_experiment.yaml \\\n      --mode treatment \\\n      --workloads workload-marketing-high-style workload-product-ui-terminology-heavy workload-support-knowledgebase-mixed \\\n      --run_id treatment_v1",
+      "Verify that outputs for baseline and treatment are stored in distinct directories (e.g., outputs/baseline_v1/ and outputs/treatment_v1/) with aligned segment IDs.",
+      "Launch human evaluation UI (if enabled in config) to collect human ratings and post-editing signals; evaluators should see randomized, blinded pairs of outputs:\n  docker run --rm -p 8501:8501 -v $(pwd):/app ailoc-ch11:latest \\\n    streamlit run eval/human_eval_app.py -- \\\n      --config configs/ch11_experiment.yaml \\\n      --runs baseline_v1 treatment_v1",
+      "Collect enough human evaluations to meet the sample size specified in configs/ch11_experiment.yaml (e.g., at least 200 rated segments per condition per workload).",
+      "Run analysis script to compute metrics and generate comparison tables/plots:\n  docker run --rm -v $(pwd):/app ailoc-ch11:latest \\\n    python analysis/compare_assets_vs_no_assets.py \\\n      --config configs/ch11_experiment.yaml \\\n      --baseline_run baseline_v1 \\\n      --treatment_run treatment_v1 \\\n      --output_dir analysis/results_ch11_exp1"
+    ],
+    "post_run": [
+      "Review analysis artifacts: metrics_summary.json, per_segment_metrics.csv, and plots under analysis/results_ch11_exp1/.",
+      "Document any deviations from the default configuration (e.g., alternative embedding model, different TM thresholds) in a run_notes.md file stored alongside results.",
+      "If repeating the experiment (e.g., with updated TM cleaning or different thresholds), increment run_id (e.g., baseline_v2, treatment_v2) and preserve prior results for comparison."
+    ]
+  },
+  "evidence_schema": {
+    "run_metadata": {
+      "file": "analysis/results_ch11_exp1/run_metadata.json",
+      "fields": {
+        "experiment_id": "string, must equal exp-ch11-linguistic-assets-tm-terms-vs-none-v1",
+        "run_id_baseline": "string identifier, e.g., baseline_v1",
+        "run_id_treatment": "string identifier, e.g., treatment_v1",
+        "timestamp_utc": "ISO 8601 timestamp when analysis was executed",
+        "git_commit_hash": "string, commit hash of repository at run time",
+        "config_path": "string path to the YAML config used",
+        "mt_model_identifier": "string, e.g., provider/model-name:version",
+        "embedding_model_identifier": "string, e.g., sentence-transformers/model-name:version",
+        "notes": "free-text field for deviations or special conditions"
+      }
+    },
+    "corpus_level_metrics": {
+      "file": "analysis/results_ch11_exp1/metrics_summary.json",
+      "structure": {
+        "workloads": [
+          {
+            "name": "string, workload identifier",
+            "language_pair": "string, e.g., en->fr",
+            "baseline": {
+              "automatic_bleu": "float",
+              "automatic_comet": "float",
+              "terminology_accuracy": "float (0\u2013100)",
+              "terminology_violation_rate": "float (0\u2013100)",
+              "style_consistency_score": "float (1\u20135)",
+              "overall_human_quality_score": "float (1\u20135)",
+              "post_editing_effort_time": "float (seconds per segment)",
+              "post_editing_keystrokes": "float (keystrokes per segment)",
+              "asset_hit_rate_tm": "float (0\u2013100, should be 0 in baseline)",
+              "asset_hit_rate_termbase": "float (0\u2013100, should be 0 in baseline)",
+              "asset_hit_rate_vector": "float (0\u2013100, should be 0 in baseline)",
+              "cycle_time_pipeline": "float (seconds per 1000 characters)"
+            },
+            "treatment": {
+              "automatic_bleu": "float",
+              "automatic_comet": "float",
+              "terminology_accuracy": "float (0\u2013100)",
+              "terminology_violation_rate": "float (0\u2013100)",
+              "style_consistency_score": "float (1\u20135)",
+              "overall_human_quality_score": "float (1\u20135)",
+              "post_editing_effort_time": "float (seconds per segment)",
+              "post_editing_keystrokes": "float (keystrokes per segment)",
+              "asset_hit_rate_tm": "float (0\u2013100)",
+              "asset_hit_rate_termbase": "float (0\u2013100)",
+              "asset_hit_rate_vector": "float (0\u2013100)",
+              "cycle_time_pipeline": "float (seconds per 1000 characters)"
+            },
+            "delta": {
+              "automatic_comet": "treatment - baseline",
+              "terminology_accuracy": "treatment - baseline (percentage points)",
+              "post_editing_effort_time": "treatment / baseline - 1 (relative change)",
+              "overall_human_quality_score": "treatment - baseline",
+              "style_consistency_score": "treatment - baseline"
+            },
+            "statistics": {
+              "p_values": {
+                "terminology_accuracy": "float, p-value from appropriate test",
+                "post_editing_effort_time": "float",
+                "overall_human_quality_score": "float"
+              },
+              "effect_sizes": {
+                "post_editing_effort_time": "float, effect size (e.g., Cohen's d)"
+              }
+            },
+            "roi_estimate": {
+              "assumed_monthly_volume_segments": "integer",
+              "assumed_rate_per_hour": "float, currency/hour",
+              "estimated_hours_saved_per_month": "float",
+              "estimated_gross_savings_per_month": "float, currency",
+              "estimated_asset_maintenance_cost_per_month": "float, currency",
+              "estimated_net_savings_per_month": "float, currency"
+            }
+          }
+        ]
+      }
+    },
+    "segment_level_metrics": {
+      "file": "analysis/results_ch11_exp1/per_segment_metrics.csv",
+      "columns": [
+        "segment_id",
+        "workload_name",
+        "language_pair",
+        "condition",
+        "source_text_hash",
+        "tm_fuzzy_score",
+        "has_termbase_term",
+        "has_vector_example",
+        "automatic_comet",
+        "terminology_correct_count",
+        "terminology_required_count",
+        "terminology_violations_count",
+        "human_overall_score",
+        "human_style_score",
+        "post_edit_time_seconds",
+        "post_edit_keystrokes"
+      ]
+    },
+    "asset_governance_log": {
+      "file": "analysis/results_ch11_exp1/asset_governance_log.json",
+      "fields": {
+        "tm_sources": [
+          {
+            "path": "string",
+            "records_before_cleaning": "integer",
+            "records_after_cleaning": "integer",
+            "cleaning_rules_applied": "string array or description"
+          }
+        ],
+        "termbase_sources": [
+          {
+            "path": "string",
+            "term_count": "integer",
+            "languages": "array of language pairs",
+            "forbidden_terms_count": "integer"
+          }
+        ],
+        "vector_index": {
+          "index_path": "string",
+          "document_count": "integer",
+          "embedding_model": "string",
+          "build_timestamp_utc": "ISO 8601 timestamp"
+        }
+      }
+    }
+  }
+}
